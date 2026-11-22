@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Настройка кабинета БГУ</title>
+<style>
+  :root {
+    --bg: #171512;
+    --panel: #221f1a;
+    --edge: #3a352b;
+    --ink: #f2efe6;
+    --muted: #a29b8a;
+    --btn: #f2efe6;
+    --btn-ink: #171512;
+    --field: #1b1915;
+    --ring: rgba(242,239,230,.08);
+    --ok: #4fae7c;
+  }
+  html[data-theme="light"] {
+    --bg: #f5f2ec;
+    --panel: #fbfaf6;
+    --edge: #e3ded2;
+    --ink: #1e1c17;
+    --muted: #6f6a5d;
+    --btn: #1e1c17;
+    --btn-ink: #f5f2ec;
+    --field: #fff;
+    --ring: rgba(30,28,23,.08);
+    --ok: #2f8f5b;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+  }
+  .left {
+    padding: 32px 64px;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  .brand {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: .01em;
+    display: flex; align-items: center; gap: 10px;
+    color: var(--ink);
+  }
+  .brand img { display: block; height: 26px; width: 26px; border-radius: 6px; }
+  .top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding-right: calc(clamp(220px, 30vw, 34vw) + 8px);
+  }
+  .theme {
+    background: none;
+    border: 1px solid var(--edge);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1;
+    padding: 7px 12px;
+    cursor: pointer;
+    transition: color .15s, border-color .15s;
+  }
+  .theme:hover { color: var(--ink); border-color: var(--muted); }
+  .hero {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    max-width: 400px;
+    width: 100%;
+    margin-inline: auto;
+  }
+  h1 {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 40px;
+    font-weight: 500;
+    line-height: 1.12;
+    margin: 0 0 10px;
+  }
+  .sub {
+    font-size: 15px;
+    color: var(--muted);
+    margin: 0 0 30px;
+    line-height: 1.5;
+  }
+  .sub a { color: var(--ink); }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    padding: 22px;
+  }
+  label { display: block; font-size: 12.5px; color: var(--muted); margin: 14px 0 6px; }
+  label:first-of-type { margin-top: 0; }
+  .field { position: relative; }
+  input {
+    width: 100%;
+    background: var(--field);
+    border: 1px solid var(--edge);
+    border-radius: 9px;
+    color: var(--ink);
+    font-size: 15px;
+    padding: 11px 40px 11px 12px;
+    outline: none;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  input::placeholder { color: var(--muted); opacity: .7; }
+  input:focus {
+    border-color: var(--muted);
+    box-shadow: 0 0 0 3px var(--ring);
+  }
+  .eye {
+    position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
+    background: none; border: 0; color: var(--muted); cursor: pointer;
+    font-size: 14px; padding: 8px; line-height: 1;
+  }
+  .eye:hover { color: var(--ink); }
+  button.save {
+    width: 100%;
+    margin-top: 18px;
+    padding: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--btn-ink);
+    background: var(--btn);
+    border: 0;
+    border-radius: 9px;
+    cursor: pointer;
+    transition: filter .15s, transform .06s;
+  }
+  button.save:hover { filter: brightness(1.25); }
+  button.save:active { transform: translateY(1px); }
+  .secure {
+    margin-top: 14px;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.5;
+    text-align: center;
+  }
+  .err { color: #b3402e; font-size: 12.5px; margin-top: 8px; display: none; }
+  .right {
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    width: clamp(220px, 30vw, 34vw);
+    padding: 14px 14px 14px 0;
+    display: flex;
+  }
+  .photo {
+    flex: 1;
+    border-radius: 14px;
+    background: url("setup-hero.jpg") center / cover no-repeat;
+    min-height: 200px;
+  }
+  .done { text-align: center; padding: 10px 0 4px; }
+  .done .ring {
+    width: 58px; height: 58px; margin: 0 auto 16px;
+    border-radius: 50%;
+    background: rgba(47,143,91,.1);
+    border: 2px solid var(--ok);
+    display: grid; place-items: center;
+    animation: pop .3s ease-out;
+  }
+  @keyframes pop { from { transform: scale(.6); opacity: 0; } }
+  .done h2 { font-family: Georgia, serif; font-weight: 500; margin: 0 0 8px; font-size: 22px; }
+  .done p { color: var(--muted); font-size: 13.5px; margin: 0; }
+  @media (max-width: 1080px) {
+    .right { display: none; }
+    .top { padding-right: 0; }
+    .left { padding: 32px; }
+  }
+</style>
+</head>
+<body>
+<div class="left">
+  <div class="top">
+    <div class="brand">
+      <img src="setup-logo.png" alt="Эмблема БГУ">
+      Кабинет БГУ
+    </div>
+    <button class="theme" id="themeBtn" title="Переключить тему">☀</button>
+  </div>
+  <div class="hero">
+    <h1>Настройка входа</h1>
+    <p class="sub">Введите логин и пароль от <a href="https://teacher-cabinet.bsu.by/" target="_blank" rel="noopener">teacher-cabinet.bsu.by</a>. Это делается один раз, потом вход происходит сам.</p>
+
+    <div class="card" id="card">
+      <label for="l">Логин</label>
+      <div class="field"><input id="l" autocomplete="off" placeholder="fpm.ivanov"></div>
+
+      <label for="p">Пароль</label>
+      <div class="field">
+        <input id="p" type="password" placeholder="••••••••">
+        <button class="eye" id="eye" title="Показать пароль">&#128065;</button>
+      </div>
+      <div class="err" id="err">Заполните оба поля</div>
+
+      <button class="save" id="save">Сохранить</button>
+
+      <div class="secure">Пароль никуда не отправляется. Он сохраняется
+        в защищённом хранилище вашей ОС (Credential Manager, Keychain или Secret Service).</div>
+    </div>
+  </div>
+</div>
+<div class="right"><div class="photo"></div></div>
+
+<script>
+const root = document.documentElement;
+const themeBtn = document.getElementById('themeBtn');
+function applyTheme(t) {
+  root.dataset.theme = t;
+  themeBtn.textContent = t === 'light' ? '☾' : '☀';
+  try { localStorage.setItem('bsu-theme', t); } catch (e) {}
+}
+let savedTheme = null;
+try { savedTheme = localStorage.getItem('bsu-theme'); } catch (e) {}
+applyTheme(savedTheme || 'dark');
+themeBtn.onclick = () => applyTheme(root.dataset.theme === 'light' ? 'dark' : 'light');
+
+const p = document.getElementById('p');
+document.getElementById('eye').onclick = () => { p.type = p.type === 'password' ? 'text' : 'password'; };
+
+const card = document.getElementById('card');
+const loginField = document.getElementById('l');
+const saveButton = document.getElementById('save');
+const error = document.getElementById('err');
+saveButton.onclick = async () => {
+  const login = loginField.value.trim();
+  const password = p.value;
+  if (!login || !password) {
+    error.style.display = 'block';
+    return;
+  }
+  loginField.value = '';
+  p.value = '';
+  error.style.display = 'none';
+  saveButton.disabled = true;
+  let saved = false;
+  try { saved = await window.bsuSaveCredentials(login, password); } catch (e) {}
+  if (!saved) {
+    error.textContent = 'Не удалось сохранить данные входа.';
+    error.style.display = 'block';
+    card.dataset.setupResult = 'error';
+    return;
+  }
+  card.innerHTML = `
+    <div class="done">
+      <div class="ring">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#4fae7c" stroke-width="3" stroke-linecap="round">
+          <path d="M4 12.5l5 5L20 6.5"/>
+        </svg>
+      </div>
+      <h2>Готово</h2>
+      <p>Данные входа сохранены.</p>
+    </div>`;
+  card.dataset.setupResult = 'saved';
+};
+p.addEventListener('keydown', e => { if (e.key === 'Enter') saveButton.click(); });
+</script>
+</body>
+</html>

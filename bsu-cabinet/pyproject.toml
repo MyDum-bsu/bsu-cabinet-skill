@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mo-bsu-cabinet"
+version = "0.1.0"
+description = "Автоматизация личного кабинета преподавателя БГУ: карточки занятий и индивидуальный план"
+requires-python = ">=3.12"
+dependencies = [
+    "playwright>=1.40",
+    "openpyxl>=3.1",
+    "pyyaml>=6.0",
+    "keyring>=24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+mo-cabinet = "bsu_cabinet.cli:main"
+bsu-browser = "bsu_cabinet.browser_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+bsu_cabinet = ["assets/*"]
