@@ -3,7 +3,7 @@
 header:
   faculty: Примерный факультет
   specialty: примерная специальность [0-00-0000-00]
-  discipline: Примерная дисциплина
+  discipline_code: Примерная дисциплина
   course: 3
   semester: 5
   academic_year: 2026-2027

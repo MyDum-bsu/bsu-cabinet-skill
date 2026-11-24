@@ -4,9 +4,10 @@
 from fractions import Fraction
 from pathlib import Path
 
-from bsu_cabinet.workload import workload_document
 from fixtures.roster import build_group_xlsx
 from fixtures.sht import CANON_ROWS, build_sht
+
+from bsu_cabinet.workload import workload_document
 
 
 def test_parse_synthetic_workbook(tmp_path: Path):
@@ -15,7 +16,7 @@ def test_parse_synthetic_workbook(tmp_path: Path):
     assert doc["status"] == "ok", doc["issues"]
 
     data = doc["data"]
-    assert data["teacher"] == "Иванова Анна Сергеевна"
+    assert data["teacher"] == "Примерова Анна Сергеевна"
     assert len(data["rows"]) == 4
 
     mo = data["rows"][0]
@@ -42,5 +43,5 @@ def test_parse_group_xlsx(tmp_path: Path):
     assert roster.group == "1"
     assert roster.course == 3
     assert len(roster.students) == 3
-    assert roster.students[0].name == "Борисова Алина Петровна"
+    assert roster.students[0].name == "Студентова Алина Примеровна"
     assert roster.students[0].subgroup == "1А"

@@ -32,6 +32,13 @@ from fractions import Fraction
 from pathlib import Path
 
 
+def _require_args(rest: list[str], count: int, usage: str) -> None:
+    """Единая понятная ошибка CLI вместо IndexError на неполной команде."""
+    if len(rest) < count:
+        print(f"Недостаточно аргументов. Использование: {usage}", file=sys.stderr)
+        sys.exit(2)
+
+
 def _json_default(o: object) -> object:
     if isinstance(o, Fraction):
         return float(o) if o.denominator != 1 else o.numerator
@@ -51,7 +58,7 @@ def cmd_snapshot(raw_path: str) -> None:
     from .plan import snapshot_document
     from .schema import dumps, exit_code
 
-    raw = json.loads(open(raw_path, encoding="utf-8").read())
+    raw = json.loads(Path(raw_path).read_text(encoding="utf-8"))
     doc = snapshot_document(raw)
     print(dumps(doc))
     sys.exit(exit_code(doc))
@@ -62,8 +69,8 @@ def cmd_plan_diff(workload_path: str, snapshot_path: str) -> None:
     from .schema import dumps, exit_code
 
     doc = plan_diff_document(
-        json.loads(open(workload_path, encoding="utf-8").read()),
-        json.loads(open(snapshot_path, encoding="utf-8").read()),
+        json.loads(Path(workload_path).read_text(encoding="utf-8")),
+        json.loads(Path(snapshot_path).read_text(encoding="utf-8")),
     )
     print(dumps(doc))
     sys.exit(exit_code(doc))
@@ -258,22 +265,29 @@ def main() -> None:
                 sys.exit(2)
             year = rest[i + 1]
             rest = rest[:i] + rest[i + 2:]
+        _require_args(rest, 1, "mo-cabinet workload <xlsx> [--year Г]")
         cmd_workload(rest[0], year=year)
     elif cmd == "snapshot":
+        _require_args(rest, 1, "mo-cabinet snapshot <raw.json>")
         cmd_snapshot(rest[0])
     elif cmd == "plan-diff":
+        _require_args(rest, 2, "mo-cabinet plan-diff <workload.json> <snapshot.json>")
         cmd_plan_diff(rest[0], rest[1])
     elif cmd == "parse-roster":
+        _require_args(rest, 1, "mo-cabinet parse-roster <xlsx>")
         cmd_parse_roster(rest[0])
     elif cmd == "card-plan":
+        _require_args(rest, 1, "mo-cabinet card-plan <spec.yaml>")
         cmd_card_plan(rest[0])
     elif cmd == "schedule-index":
         cmd_schedule_index(rest)
     elif cmd == "schedule-find":
         cmd_schedule_find(rest)
     elif cmd == "snapshot-card":
+        _require_args(rest, 1, "mo-cabinet snapshot-card <raw.json>")
         cmd_card_snapshot(rest[0])
     elif cmd == "topics":
+        _require_args(rest, 1, "mo-cabinet topics <topics.json>")
         cmd_topics(rest[0])
     elif cmd == "card-diff":
         cmd_card_diff(rest)

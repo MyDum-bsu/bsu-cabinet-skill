@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import copy
 
-OWNER = "Иванова Анна Сергеевна"
+OWNER = "Примерова Анна Сергеевна"
 YEAR = "2026-2027"
 
 # категории годовых работ, как их показывает tbl-20
@@ -80,7 +80,7 @@ POPULATED_ROWS = [
     },
 ]
 
-POPULATED_TOTALS = {"autumn": "105,6", "spring": "69", "annual": "85", "grand": "259,6"}
+POPULATED_TOTALS = {"autumn": "145,6", "spring": "69", "annual": "85", "grand": "299,6"}
 
 
 def raw_empty(status_plan: int = 0) -> dict:

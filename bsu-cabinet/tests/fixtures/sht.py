@@ -95,7 +95,7 @@ class Formula(str):
     """Ячейка-формула: строка '=...' без кэша результата (data_only → None)."""
 
 
-TEACHER = "Иванова Анна Сергеевна"
+TEACHER = "Примерова Анна Сергеевна"
 
 # Полная вымышленная нагрузка: два семестровых назначения осени, два весны,
 # годовые работы, консультация без аудиторных занятий и чисто годовая строка.
@@ -358,7 +358,7 @@ def build_sht(
     return path
 
 
-def inject_formula_cache(path: Path, cell: str, value: float | int) -> None:
+def inject_formula_cache(path: Path, cell: str, value: float) -> None:
     """Zip-хирургия: добавить <v> к формуле <f> в ячейке (кэш результата)."""
     path = Path(path)
     tmp = path.with_suffix(".tmp.xlsx")

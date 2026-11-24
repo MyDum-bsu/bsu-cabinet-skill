@@ -3,6 +3,7 @@
 Обычный `bsu-browser login` не обращается к adb. Авто-SMS включается отдельно и только с ранее сопряжённым телефоном, выбранным владельцем:
 
 ```bash
+# из checkout — в каталоге bsu-cabinet; в комплекте — без `uv run`
 uv run bsu-browser login --sms adb --adb-serial <выбранное-устройство>
 ```
 

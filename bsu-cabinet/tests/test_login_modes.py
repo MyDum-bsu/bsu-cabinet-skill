@@ -1,6 +1,7 @@
 from unittest.mock import Mock
 
 import pytest
+
 from bsu_cabinet import browser_cli, creds, login, sms
 from bsu_cabinet.browser import BASE_URL, LOGIN_URL
 
@@ -1488,3 +1489,13 @@ def test_start_transport_failure_stops_only_same_snapshot(monkeypatch):
 
     stop.assert_not_called()
     popen.assert_not_called()
+
+
+def test_browser_cli_missing_fill_argument_is_clean_error(monkeypatch, capsys):
+    monkeypatch.setattr(browser_cli.sys, "argv", ["bsu-browser", "fill", "Логин"])
+    with pytest.raises(SystemExit) as exc:
+        browser_cli.main()
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert "Использование: bsu-browser fill <label> <value>" in captured.err
+    assert "Traceback" not in captured.err

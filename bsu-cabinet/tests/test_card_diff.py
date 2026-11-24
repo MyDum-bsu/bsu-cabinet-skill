@@ -10,13 +10,14 @@ from __future__ import annotations
 import json
 from datetime import date
 
+from fixtures import cards as fx
+
 from bsu_cabinet.carddiff import (
     card_diff_document,
     card_snapshot_document,
     topics_document,
 )
 from bsu_cabinet.plan import snapshot_document
-from fixtures import cards as fx
 
 AS_OF = date(2026, 9, 23)  # зафиксированная дата Europe/Minsk для прогона
 
@@ -156,7 +157,7 @@ def test_diff_deterministic_repeat_no_second_run_writes():
 def test_teacher_mismatch_blocks_without_ops():
     slot = _lab_slot([fx.instance("2026-09-22", ordinal=1)])
     doc = card_diff_document(
-        fx.slots_doc([slot], teacher="Петрова И.И."),
+        fx.slots_doc([slot], teacher="Посторонняя И.И."),
         _snap([]), _plan([_lab_row()]), as_of=AS_OF)
     assert doc["status"] == "blocked"
     assert "teacher-mismatch" in _codes(doc)
@@ -164,10 +165,10 @@ def test_teacher_mismatch_blocks_without_ops():
 
 
 def test_same_surname_other_initials_is_mismatch():
-    """«Иванова Б.П.» ≠ «Иванова Анна Сергеевна»: одна фамилия — не человек."""
+    """«Примерова Б.П.» ≠ «Примерова Анна Сергеевна»: одна фамилия — не человек."""
     slot = _lab_slot([fx.instance("2026-09-22", ordinal=1)])
     doc = card_diff_document(
-        fx.slots_doc([slot], teacher="Иванова Б.П."),
+        fx.slots_doc([slot], teacher="Примерова Б.П."),
         _snap([]), _plan([_lab_row()]), as_of=AS_OF)
     assert doc["status"] == "blocked"
     assert "teacher-mismatch" in _codes(doc)
@@ -175,7 +176,7 @@ def test_same_surname_other_initials_is_mismatch():
 
 
 def test_agreed_abbreviation_and_explicit_map_agree():
-    """«Иванова А.С.» ≡ «Иванова Анна Сергеевна» — согласованное сокращение;
+    """«Примерова А.С.» ≡ «Примерова Анна Сергеевна» — согласованное сокращение;
     прочая пара — только по явному подтверждённому сопоставлению."""
     slot = _lab_slot([fx.instance("2026-09-22", ordinal=1)])
     slots = fx.slots_doc([slot])
@@ -187,14 +188,14 @@ def test_agreed_abbreviation_and_explicit_map_agree():
 
     # явное подтверждённое сопоставление тоже допустимо
     mapped = card_diff_document(
-        fx.slots_doc([slot], teacher="Иванова Б.П."), _snap([]),
+        fx.slots_doc([slot], teacher="Примерова Б.П."), _snap([]),
         _plan([_lab_row()]), topics_doc=topics,
-        name_map={"Иванова Б.П.": "Иванова Анна Сергеевна"}, as_of=AS_OF)
+        name_map={"Примерова Б.П.": "Примерова Анна Сергеевна"}, as_of=AS_OF)
     assert "teacher-mismatch" not in _codes(mapped)
 
     # голая фамилия без инициалов — не доказательство
     bare = card_diff_document(
-        fx.slots_doc([slot], teacher="Иванова"), _snap([]),
+        fx.slots_doc([slot], teacher="Примерова"), _snap([]),
         _plan([_lab_row()]), topics_doc=topics, as_of=AS_OF)
     assert "teacher-mismatch" in _codes(bare)
 
@@ -203,7 +204,7 @@ def test_card_owner_and_year_checked_too():
     """owner/year снимка карточки сверяются со слотами и ИП, а не молчат."""
     slot = _lab_slot([fx.instance("2026-09-22", ordinal=1)])
     slots = fx.slots_doc([slot])
-    doc = card_diff_document(slots, _snap([], owner="Петрова И.И."),
+    doc = card_diff_document(slots, _snap([], owner="Посторонняя И.И."),
                              _plan([_lab_row()]), as_of=AS_OF)
     assert doc["status"] == "blocked"
     assert "teacher-mismatch" in _codes(doc)
@@ -217,7 +218,7 @@ def test_card_owner_and_year_checked_too():
 def test_slot_assignment_must_be_confirmed_teacher():
     """Фактическое назначение слота — другой человек: блок, не add."""
     slot = _lab_slot([fx.instance("2026-09-22", ordinal=1)],
-                     assignment="Иванова Б.П.")
+                     assignment="Примерова Б.П.")
     doc = card_diff_document(fx.slots_doc([slot]), _snap([]),
                              _plan([_lab_row()]), as_of=AS_OF)
     assert doc["status"] == "blocked"
@@ -244,7 +245,7 @@ def test_scope_hash_covers_owner_year_and_whole_raw_table():
     h = card_snapshot_document(base)["data"]["scopeHash"]
     assert h
     for mut in (
-        lambda r: r.update(owner="Петрова И.И."),
+        lambda r: r.update(owner="Посторонняя И.И."),
         lambda r: r.update(year="2027-2028"),
         lambda r: r.update(key="102"),
         lambda r: r.update(status=2),
@@ -404,7 +405,6 @@ def test_hours_within_limit_ok():
 def test_move_edits_instance_not_duplicate_and_not_twice(tmp_path):
     """Известный перенос меняет экземпляр: существующая карточка на старую
     дату правится, а не дублируется; повторный прогон — noop."""
-    from bsu_cabinet.schedule import index_document, schedule_find_document
     from fixtures.schedule import (
         FOLDER_URL,
         book_entry,
@@ -412,8 +412,10 @@ def test_move_edits_instance_not_duplicate_and_not_twice(tmp_path):
         drive_folder_html,
     )
 
+    from bsu_cabinet.schedule import index_document, schedule_find_document
+
     book = build_book_a(tmp_path / "a.xlsx", slots={
-        (1, 0, 9): "Дискретная математика (лаб.)\nИванова А.С. еженедельно",
+        (1, 0, 9): "Дискретная математика (лаб.)\nПримерова А.С. еженедельно",
     }, col_overrides={9: (1, "А")})  # гр.1А во вторнике вне полос чётности
     idx = index_document(
         drive_folder_html([book_entry("ID-A", "2 курс, 3 семестр, 2026-2027.xlsx")]).encode(),

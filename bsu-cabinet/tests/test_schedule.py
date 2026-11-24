@@ -9,13 +9,7 @@ import hashlib
 from pathlib import Path
 from unittest.mock import Mock
 
-import bsu_cabinet.schedule as schedule_mod
 import pytest
-from bsu_cabinet.schedule import (
-    fetch_index_document,
-    index_document,
-    schedule_find_document,
-)
 from fixtures.schedule import (
     FOLDER_ID,
     FOLDER_URL,
@@ -29,7 +23,14 @@ from fixtures.schedule import (
     make_fetch,
 )
 
-TEACHER = "Иванова А.С."
+import bsu_cabinet.schedule as schedule_mod
+from bsu_cabinet.schedule import (
+    fetch_index_document,
+    index_document,
+    schedule_find_document,
+)
+
+TEACHER = "Примерова А.С."
 
 INDEX_NAME_A = "2 курс, 3 семестр, 2026-2027.xlsx"
 INDEX_NAME_B = "3 курс, 5 семестр, 2026-2027.xlsx"
@@ -42,10 +43,10 @@ def _codes(doc: dict) -> list[str]:
 @pytest.fixture()
 def book_a(tmp_path: Path) -> Path:
     return build_book_a(tmp_path / "a.xlsx", slots={
-        (0, 0, 3): "Дискретная математика (лаб.), ауд.212\nИванова А.С.",   # Пн, 1А, чёт
-        (0, 1, 6): "Методы оптимизации, лек., поток ИН\nИванова А.С., ауд.305 (нечётн.)",  # Пн нечёт
-        (1, 0, 9): "Численные методы (пр.) с 15.09\nИванова А.С., ауд.101 еженедельно",    # Вт, гр.3
-        (2, 2, 4): "Информатика (лаб.) по 20.11\nПетрова И.И.",            # Ср, чужой
+        (0, 0, 3): "Дискретная математика (лаб.), ауд.212\nПримерова А.С.",   # Пн, 1А, чёт
+        (0, 1, 6): "Методы оптимизации, лек., поток ИН\nПримерова А.С., ауд.305 (нечётн.)",  # Пн нечёт
+        (1, 0, 9): "Численные методы (пр.) с 15.09\nПримерова А.С., ауд.101 еженедельно",    # Вт, гр.3
+        (2, 2, 4): "Информатика (лаб.) по 20.11\nПосторонняя И.И.",            # Ср, чужой
     })
 
 
@@ -276,8 +277,8 @@ def test_same_id_changed_bytes_detectable(book_a: Path, tmp_path: Path):
     """Тот же ID, другое содержимое → другой sha и другой разбор."""
     doc1 = _find(_index_doc(book_a), book_a)
     changed = build_book_a(tmp_path / "a2.xlsx", slots={
-        (0, 0, 3): "Дискретная математика (лаб.), ауд.212\nИванова А.С.",
-        (3, 0, 5): "Алгебра (лек.) еженедельно\nИванова А.С.",  # новый слот Чт
+        (0, 0, 3): "Дискретная математика (лаб.), ауд.212\nПримерова А.С.",
+        (3, 0, 5): "Алгебра (лек.) еженедельно\nПримерова А.С.",  # новый слот Чт
     })
     doc2 = _find(_index_doc(changed), changed)
     assert doc1["status"] == doc2["status"] == "ok", doc2["issues"]
@@ -321,10 +322,10 @@ def test_format_a_slots(book_a: Path):
     assert d["scope"] == {"year": "2026-2027", "course": 2, "semester": 3, "cell": "C8"}
     assert d["bookId"] == "ID-A"
     slots = d["slots"]
-    assert len(slots) == 3  # три назначения Ивановой, чужая Петрова не входит
+    assert len(slots) == 3  # три назначения Примеровой, чужая Посторонняя не входит
 
     lab = next(s for s in slots if s["discipline"] == "Дискретная математика")
-    assert lab["assignment"] == "Иванова А.С."
+    assert lab["assignment"] == "Примерова А.С."
     assert lab["kind"] == "laboratory"
     assert lab["groups"] == [{"group": "1", "subgroup": "А", "stream": "Поток ИН"}]
     assert lab["weekday"] == "monday"
@@ -346,33 +347,33 @@ def test_format_a_slots(book_a: Path):
 
 
 def test_teacher_not_found_lists_candidates(book_a: Path):
-    doc = _find(_index_doc(book_a), book_a, teacher="Сидоров")
+    doc = _find(_index_doc(book_a), book_a, teacher="Несуществующий")
     assert doc["status"] == "blocked"
     issue = next(i for i in doc["issues"] if i["code"] == "teacher-not-found")
-    assert "Иванова А.С." in issue["actual"]
-    assert "Петрова И.И." in issue["actual"]
+    assert "Примерова А.С." in issue["actual"]
+    assert "Посторонняя И.И." in issue["actual"]
 
 
 def test_teacher_alternate_spelling(book_a: Path):
     """Подтверждённое иное написание имени принимается как аргумент."""
-    doc = _find(_index_doc(book_a), book_a, teacher="Иванова")
+    doc = _find(_index_doc(book_a), book_a, teacher="Примерова")
     assert doc["status"] == "ok", doc["issues"]
     assert len(doc["data"]["slots"]) == 3
 
 
 def test_teacher_ambiguous(tmp_path: Path):
     book = build_book_a(tmp_path / "a.xlsx", slots={
-        (0, 0, 3): "Дискретная математика (лаб.)\nИванова А.С.",
-        (0, 1, 4): "Алгебра (лек.)\nИванова Б.В.",
+        (0, 0, 3): "Дискретная математика (лаб.)\nПримерова А.С.",
+        (0, 1, 4): "Алгебра (лек.)\nПримерова Б.В.",
     })
-    doc = _find(_index_doc(book), book, teacher="Иванова")
+    doc = _find(_index_doc(book), book, teacher="Примерова")
     assert doc["status"] == "blocked"
     assert "teacher-ambiguous" in _codes(doc)
 
 
 def test_unknown_kind_flagged_not_guessed(tmp_path: Path):
     book = build_book_a(tmp_path / "a.xlsx", slots={
-        (0, 0, 3): "Иностранный язык\nИванова А.С., ауд.101",
+        (0, 0, 3): "Иностранный язык\nПримерова А.С., ауд.101",
     })
     doc = _find(_index_doc(book), book)
     assert doc["status"] == "ok", doc["issues"]
@@ -384,8 +385,8 @@ def test_unknown_kind_flagged_not_guessed(tmp_path: Path):
 def test_different_subgroups_and_times(tmp_path: Path):
     """Подгруппы и время разных назначений не смешиваются."""
     book = build_book_a(tmp_path / "a.xlsx", slots={
-        (0, 0, 3): "Дискретная математика (лаб.)\nИванова А.С.",  # Пн 08:00, 1А
-        (0, 1, 4): "Дискретная математика (лаб.)\nИванова А.С.",  # Пн 09:45, 1Б
+        (0, 0, 3): "Дискретная математика (лаб.)\nПримерова А.С.",  # Пн 08:00, 1А
+        (0, 1, 4): "Дискретная математика (лаб.)\nПримерова А.С.",  # Пн 09:45, 1Б
     })
     doc = _find(_index_doc(book), book)
     assert doc["status"] == "ok", doc["issues"]
@@ -398,8 +399,8 @@ def test_conflict_separate(tmp_path: Path):
     """Два неразличимых назначения (день/время/фаза/группа/подгруппа у одного
     преподавателя, разные дисциплины) — в conflicts, не молчаливый выбор."""
     book = build_book_a(tmp_path / "a.xlsx", slots={
-        (0, 0, 3): "Дискретная математика (лаб.)\nИванова А.С.",      # чёт, гр.1 А
-        (0, 0, 9): "Алгебра (пр.)\nИванова А.С. (четн.)",             # та же 1А, чёт
+        (0, 0, 3): "Дискретная математика (лаб.)\nПримерова А.С.",      # чёт, гр.1 А
+        (0, 0, 9): "Алгебра (пр.)\nПримерова А.С. (четн.)",             # та же 1А, чёт
     }, col_overrides={9: (1, "А")})
     doc = _find(_index_doc(book), book)
     assert doc["status"] == "ok", doc["issues"]
@@ -411,7 +412,7 @@ def test_conflict_separate(tmp_path: Path):
 def test_empty_neighbor_not_filled(tmp_path: Path):
     """Пустая ячейка не наследует назначение соседней."""
     book = build_book_a(tmp_path / "a.xlsx", slots={
-        (0, 0, 3): "Дискретная математика (лаб.)\nИванова А.С.",  # только 1А
+        (0, 0, 3): "Дискретная математика (лаб.)\nПримерова А.С.",  # только 1А
     })
     doc = _find(_index_doc(book), book)
     assert len(doc["data"]["slots"]) == 1
@@ -424,9 +425,9 @@ def test_empty_neighbor_not_filled(tmp_path: Path):
 @pytest.fixture()
 def book_b(tmp_path: Path) -> Path:
     return build_book_b(tmp_path / "b.xlsx", slots={
-        (0, 0, 4): "Методы оптимизации (лек.)\nИванова А.С., ауд.305 (четн.)",
-        (0, 1, 5): "Анализ данных (пр.)\nИванова А.С., в 15.00 с 12.10",
-        (1, 2, 6): "Информатика\nСидорова А.А., ауд.101",
+        (0, 0, 4): "Методы оптимизации (лек.)\nПримерова А.С., ауд.305 (четн.)",
+        (0, 1, 5): "Анализ данных (пр.)\nПримерова А.С., в 15.00 с 12.10",
+        (1, 2, 6): "Информатика\nПосторонняя А.А., ауд.101",
     })
 
 
@@ -456,7 +457,7 @@ def test_format_b_alt_time_column(tmp_path: Path):
     """Альтернативное время из отдельной колонки C."""
     book = build_book_b(tmp_path / "b.xlsx",
                         alt_times={23: "в 17.00"},
-                        slots={(0, 1, 4): "Анализ (пр.)\nИванова А.С."})
+                        slots={(0, 1, 4): "Анализ (пр.)\nПримерова А.С."})
     doc = schedule_find_document(
         _index_b(book), year="2026-2027", semester=5, course=3,
         teacher=TEACHER, book_bytes=book.read_bytes())
@@ -474,7 +475,7 @@ def test_format_b_alt_time_column(tmp_path: Path):
 def test_dates_every_with_bounds(tmp_path: Path):
     """Еженедельный слот с «с 15.09»: развёртка внутри границ, не раньше."""
     book = build_book_a(tmp_path / "a.xlsx", slots={
-        (1, 0, 9): "Численные методы (пр.) с 15.09\nИванова А.С. еженедельно",  # Вторник
+        (1, 0, 9): "Численные методы (пр.) с 15.09\nПримерова А.С. еженедельно",  # Вторник
     })
     doc = _find(_index_doc(book), book,
                 period_from="2026-09-01", period_to="2026-10-31")
@@ -493,7 +494,7 @@ def test_dates_every_with_bounds(tmp_path: Path):
 def test_dates_parity_needs_anchor(tmp_path: Path):
     """Чётная фаза без календарного якоря → блок, даты не угадываются."""
     book = build_book_a(tmp_path / "a.xlsx", slots={
-        (0, 0, 3): "Дискретная математика (лаб.)\nИванова А.С.",  # Пн, чёт
+        (0, 0, 3): "Дискретная математика (лаб.)\nПримерова А.С.",  # Пн, чёт
     })
     doc = _find(_index_doc(book), book,
                 period_from="2026-09-01", period_to="2026-10-31")
@@ -504,8 +505,8 @@ def test_dates_parity_needs_anchor(tmp_path: Path):
 
 def test_dates_parity_with_anchor(tmp_path: Path):
     book = build_book_a(tmp_path / "a.xlsx", slots={
-        (0, 0, 3): "Дискретная математика (лаб.)\nИванова А.С.",        # Пн чёт
-        (0, 1, 6): "Алгебра (лек.)\nИванова А.С.",                     # Пн нечёт
+        (0, 0, 3): "Дискретная математика (лаб.)\nПримерова А.С.",        # Пн чёт
+        (0, 1, 6): "Алгебра (лек.)\nПримерова А.С.",                     # Пн нечёт
     })
     doc = _find(_index_doc(book), book,
                 period_from="2026-09-01", period_to="2026-09-30",
@@ -520,7 +521,7 @@ def test_dates_parity_with_anchor(tmp_path: Path):
 def test_early_dates_no_history_not_blocked(tmp_path: Path):
     """Ранние даты без прежней редакции и истории — расчёт по действующей книге."""
     book = build_book_a(tmp_path / "a.xlsx", slots={
-        (1, 0, 9): "Численные методы (пр.)\nИванова А.С. еженедельно",  # без «с …»
+        (1, 0, 9): "Численные методы (пр.)\nПримерова А.С. еженедельно",  # без «с …»
     })
     doc = _find(_index_doc(book), book,
                 period_from="2026-09-01", period_to="2026-09-30")
@@ -533,7 +534,7 @@ def test_early_dates_no_history_not_blocked(tmp_path: Path):
 def test_known_move_and_cancel_once(tmp_path: Path):
     """Известные перенос и отмена применяются по одному разу."""
     book = build_book_a(tmp_path / "a.xlsx", slots={
-        (1, 0, 9): "Численные методы (пр.)\nИванова А.С. еженедельно",  # Вторники
+        (1, 0, 9): "Численные методы (пр.)\nПримерова А.С. еженедельно",  # Вторники
     })
     exc = {"exceptions": [
         {"date": "2026-09-08", "action": "move", "newDate": "2026-09-10",
@@ -558,7 +559,7 @@ def test_known_move_and_cancel_once(tmp_path: Path):
 
 def test_exception_unmatched_blocks(tmp_path: Path):
     book = build_book_a(tmp_path / "a.xlsx", slots={
-        (1, 0, 9): "Численные методы (пр.)\nИванова А.С. еженедельно",
+        (1, 0, 9): "Численные методы (пр.)\nПримерова А.С. еженедельно",
     })
     exc = {"exceptions": [{"date": "2026-12-25", "action": "cancel", "source": "x"}]}
     doc = _find(_index_doc(book), book,
@@ -569,7 +570,7 @@ def test_exception_unmatched_blocks(tmp_path: Path):
 
 def test_exceptions_file_cli_format(tmp_path: Path):
     book = build_book_a(tmp_path / "a.xlsx", slots={
-        (1, 0, 9): "Численные методы (пр.)\nИванова А.С. еженедельно",
+        (1, 0, 9): "Численные методы (пр.)\nПримерова А.С. еженедельно",
     })
     exc_path = exceptions_json(tmp_path / "exc.json", [
         {"date": "2026-09-15", "action": "cancel", "source": "приказ"}])
@@ -592,7 +593,7 @@ def test_source_refs_to_cells(book_a: Path):
 def test_instances_carry_stable_ordinal(tmp_path: Path):
     """Порядковый номер занятия серии не сдвигается при переносе/отмене."""
     book = build_book_a(tmp_path / "a.xlsx", slots={
-        (1, 0, 9): "Численные методы (пр.)\nИванова А.С. еженедельно",
+        (1, 0, 9): "Численные методы (пр.)\nПримерова А.С. еженедельно",
     })
     exc = {"exceptions": [
         {"date": "2026-09-08", "action": "move", "newDate": "2026-09-10",
@@ -610,3 +611,128 @@ def test_instances_carry_stable_ordinal(tmp_path: Path):
     assert ords["2026-09-29"] == 5   # №4 отменён — без сдвига нумерации
     moved = next(i for i in inst if i["date"] == "2026-09-10")
     assert moved["originalTime"] == {"localStart": "08:00", "localEnd": "09:35"}
+
+
+# ---------------------------------------------------------------------------
+# Полировочные edge-cases: полосы XLSX, область сетки, пределы серий
+# ---------------------------------------------------------------------------
+
+def test_unmerged_parity_stripes_merged_group_header_and_blank_rows(tmp_path: Path):
+    """Striped-полоса без merge не смещает колонки и не становится потоком;
+    горизонтально объединённая группа и пустые строки шапки сохраняют адреса."""
+    import openpyxl
+
+    book = build_book_a(tmp_path / "striped.xlsx", slots={
+        (0, 0, 3): "Дискретная математика (лаб.)\nПримерова А.С.",  # Пн, 1А
+    })
+    wb = openpyxl.load_workbook(book)
+    ws = wb.active
+    # группа 1 реально объединена над подгруппами А/Б, а не повторена текстом
+    ws.merge_cells(start_row=15, start_column=3, end_row=15, end_column=4)
+    # полосы чётности без merge: подпись повторяется в каждой колонке;
+    # строки 17–19 уже пустые, как в выгрузке с разрежённой шапкой
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row == 20:
+            ws.unmerge_cells(str(rng))
+    for c in (3, 4, 5):
+        ws.cell(20, c, "чётная неделя")
+    for c in (6, 7, 8):
+        ws.cell(20, c, "нечётная неделя")
+    wb.save(book)
+
+    doc = _find(_index_doc(book), book)
+    assert doc["status"] == "ok", doc["issues"]
+    slot = doc["data"]["slots"][0]
+    assert slot["groups"] == [{"group": "1", "subgroup": "А", "stream": "Поток ИН"}]
+    assert slot["phase"] == "even"
+    assert not any(a["code"] == "phase-unknown" for a in slot["ambiguities"])
+
+
+def test_formatting_only_empty_tail_not_scanned(tmp_path: Path, monkeypatch):
+    """Пустой formatting-only хвост XLSX не обходится построчно и не входит
+    в область сетки; сами диапазоны дней при этом не обрезаются."""
+    import openpyxl
+    from openpyxl.styles import PatternFill
+
+    book = build_book_a(tmp_path / "tail.xlsx", slots={
+        (0, 0, 3): "Дискретная математика (лаб.)\nПримерова А.С.",
+    })
+    wb = openpyxl.load_workbook(book)
+    ws = wb.active
+    ws.cell(2000, 1).fill = PatternFill(fill_type="solid", fgColor="EEEEEE")
+    ws.cell(2000, 3, "Легенда вне сетки\nПримерова А.С.")
+    wb.save(book)
+
+    calls: list[int] = []
+    original = schedule_mod._day_of_row
+
+    def spy(spans, row):
+        calls.append(row)
+        return original(spans, row)
+
+    monkeypatch.setattr(schedule_mod, "_day_of_row", spy)
+    doc = _find(_index_doc(book), book)
+    assert doc["status"] == "ok", doc["issues"]
+    assert len(doc["data"]["slots"]) == 1
+    assert calls  # область не обрезана до нуля
+    assert max(calls) < 2000
+    assert all("Легенда" not in (s["discipline"] or "") for s in doc["data"]["slots"])
+
+
+def test_giant_period_blocked_before_series_generation(tmp_path: Path):
+    """Гигантский диапазон дат не разворачивается в тысячи ICS-подобных повторов."""
+    book = build_book_a(tmp_path / "huge.xlsx", slots={
+        (1, 0, 9): "Численные методы (пр.)\nПримерова А.С. еженедельно",
+    })
+    doc = _find(_index_doc(book), book,
+                period_from="0001-01-01", period_to="9999-12-31")
+    assert doc["status"] == "blocked"
+    assert "period-too-large" in _codes(doc)
+    assert doc["data"]["slots"][0]["instances"] == []
+
+
+def test_invalid_or_reversed_period_is_structured_block(tmp_path: Path):
+    """Невалидная/перевёрнутая граница — issue, а не traceback или пустая серия."""
+    book = build_book_a(tmp_path / "bad-period.xlsx", slots={
+        (1, 0, 9): "Численные методы (пр.)\nПримерова А.С. еженедельно",
+    })
+    for start, end in (("2026-10-31", "2026-09-01"), ("not-a-date", "2026-09-01")):
+        doc = _find(_index_doc(book), book, period_from=start, period_to=end)
+        assert doc["status"] == "blocked", (start, end)
+        assert "period-invalid" in _codes(doc), (start, end)
+        assert doc["data"]["slots"][0]["instances"] == []
+
+
+def test_series_instance_limit_is_enforced(tmp_path: Path, monkeypatch):
+    """Потолок экземпляров — отдельный предохранитель даже внутри допустимого периода."""
+    monkeypatch.setattr(schedule_mod, "MAX_SERIES_INSTANCES", 2)
+    book = build_book_a(tmp_path / "cap.xlsx", slots={
+        (1, 0, 9): "Численные методы (пр.)\nПримерова А.С. еженедельно",
+    })
+    doc = _find(_index_doc(book), book,
+                period_from="2026-09-01", period_to="2026-09-30")
+    assert doc["status"] == "blocked"
+    assert "series-too-large" in _codes(doc)
+    assert doc["data"]["slots"][0]["instances"] == []
+
+
+def test_day_span_detection_ignores_formatting_only_tail(tmp_path: Path):
+    """Выбор области дней тоже ограничен значениями: formatting-only строки
+    не попадают даже в первичный поиск weekday-меток."""
+    import openpyxl
+    from openpyxl.styles import PatternFill
+
+    book = build_book_a(tmp_path / "tail-scan.xlsx", slots={
+        (0, 0, 3): "Дискретная математика (лаб.)\nПримерова А.С.",
+    })
+    wb = openpyxl.load_workbook(book)
+    ws = wb.active
+    ws.cell(5000, 1).fill = PatternFill(fill_type="solid", fgColor="EEEEEE")
+    wb.save(book)
+
+    import openpyxl as op
+    check_ws = op.load_workbook(book).active
+    spans = schedule_mod._find_day_spans(check_ws, schedule_mod._merged_map(check_ws))[1]
+    assert spans
+    assert max(s["r1"] for s in spans) < 5000
+    assert schedule_mod._value_row_end(check_ws) < 5000

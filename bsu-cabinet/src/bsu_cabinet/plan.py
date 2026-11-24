@@ -64,6 +64,16 @@ _IDENT_PAYLOAD = {
     "CountStudentAlien": "students_foreign",
 }
 
+# Часовые поля, которые клиент кабинета складывает в итог строки
+# (`td.to-sum` в PersonalPlan-ur-semestr.js). Численность, курс, форма
+# обучения и описание сюда не входят.
+_SEMESTER_TOTAL_FIELDS = (
+    "Clock_lecture_a", "Clock_lecture_b", "Clock_practical_a", "Clock_practical_b",
+    "Clock_laboratory_a", "Clock_laboratory_b", "Clock_ucr_a", "Clock_ucr_b",
+    "Collocvium", "Help_now", "Help_personal", "Help_group",
+    "Check_control", "Exam", "Credit",
+)
+
 
 def _fmt(v: Fraction) -> str:
     if v == 0:
@@ -208,6 +218,12 @@ def expected_rows(wdoc: dict) -> tuple[list[dict], list[dict], list[dict]]:
                 issues.append(issue(
                     "value-unknown", source=cell["cell"], field=f"annual.{k}",
                     next="ячейка-формула без кэша"))
+                bucket = annual.setdefault(k, {
+                    "identity": {"year": year, "category": _ANNUAL_CATEGORY.get(k, k)},
+                    "field": k, "value": Fraction(0), "sources": {}, "unknown": False,
+                })
+                bucket["unknown"] = True
+                bucket["sources"][f"{row['sourceRow']}:{k}"] = cell["cell"]
                 continue
             n = _cell_num(cell)
             if not n:
@@ -231,6 +247,38 @@ def _render_num(v: Fraction) -> int | float | str:
         return v.numerator
     f = float(v)
     return f if Fraction(f) == v else str(v)
+
+
+def _norm_hours(cell: dict | None) -> Fraction | None:
+    """Часы нормализованной ячейки снимка.
+
+    Пустое поле кабинета в часовой колонке — ноль (client-side `int('')`
+    в журнале кабинета), а `unknown`/отсутствующее число — None: его нельзя
+    молча сложить как ноль.
+    """
+    if cell is None or cell["state"] == "blank":
+        return Fraction(0)
+    if cell["state"] == "unknown" or cell["value"] is None:
+        return None
+    return _frac(cell["value"])
+
+
+def _snapshot_semester_hours(normalized: dict) -> tuple[Fraction | None, list[str]]:
+    """Сумма часов строки снимка; unknown в любом слагаемом делает сумму unknown."""
+    total = Fraction(0)
+    unknown: list[str] = []
+    for field in _SEMESTER_TOTAL_FIELDS:
+        n = _norm_hours(normalized.get(field))
+        if n is None:
+            unknown.append(field)
+        else:
+            total += n
+    return (None if unknown else total), unknown
+
+
+def _snapshot_annual_hours(row: dict) -> Fraction | None:
+    """Плановое Value годовой строки; ValueResult в итог плана не входит."""
+    return _norm_hours(row.get("value"))
 
 
 # ----------------------------------------------------------------------
@@ -463,10 +511,15 @@ def plan_diff_document(wdoc: dict, sdoc: dict) -> dict:
             next="план не редактируется — предпросмотр запрещён"))
         blocked = True
 
+    # Ожидаемые значения читаются даже при policy-блоке области: это не
+    # создаёт операций, но не прячет value-unknown за owner/year/readonly.
+    sem_ops, annual_ops, exp_issues = expected_rows(wdoc)
+
     # владелец и учебный год — до расчёта операций: сомнение = стоп
     id_issues = _scope_issues(wdoc, sdata)
     if id_issues:
         issues.extend(id_issues)
+        issues.extend(exp_issues)
         return envelope("bsu.diff/1", STATUS_BLOCKED, data, issues)
 
     snap_rows = sdata.get("rows") or []
@@ -477,10 +530,27 @@ def plan_diff_document(wdoc: dict, sdoc: dict) -> dict:
 
     ops: list[dict] = []
     used_keys: set[int] = set()
-    sem_ops, annual_ops, exp_issues = expected_rows(wdoc)
     issues.extend(exp_issues)
     if exp_issues:
         blocked = True
+
+    preserved: dict[str, Fraction] = {
+        "autumn": Fraction(0), "spring": Fraction(0), "annual": Fraction(0),
+    }
+    preserved_unknown: dict[str, list[str]] = {
+        "autumn": [], "spring": [], "annual": [],
+    }
+    preserved_sources: dict[str, list[str]] = {
+        "autumn": [], "spring": [], "annual": [],
+    }
+    unresolved_total_rows: dict[str, list[str]] = {
+        "autumn": [], "spring": [], "annual": [],
+    }
+
+    def _mark_row_conflict(rows: list[dict], semester: int | None) -> None:
+        kind = "autumn" if semester == 0 else "spring" if semester == 1 else None
+        if kind:
+            unresolved_total_rows[kind].extend(str(r.get("key")) for r in rows)
 
     for exp in sem_ops:
         key = _match_key(exp["identity"], exp["semestr"])
@@ -488,12 +558,19 @@ def plan_diff_document(wdoc: dict, sdoc: dict) -> dict:
         base = {"identity": exp["identity"], "key": None,
                 "expectedPayload": exp["expectedPayload"], "sources": exp["sources"]}
         if exp.get("unresolved"):
-            ops.append({**base, "op": "conflict", "before": {},
+            if matches:
+                used_keys.update(id(m) for m in matches)
+                if len(matches) > 1:
+                    _mark_row_conflict(matches, exp["semestr"])
+            ops.append({**base, "op": "conflict",
+                        "key": matches[0]["key"] if len(matches) == 1 else None,
+                        "before": ([m["key"] for m in matches] if len(matches) > 1 else {}),
                         "reason": "value-unknown"})
             blocked = True
             continue
         if len(matches) > 1:
             used_keys.update(id(m) for m in matches)
+            _mark_row_conflict(matches, exp["semestr"])
             ops.append({**base, "op": "conflict",
                         "before": [m["key"] for m in matches],
                         "reason": "indistinguishable-rows"})
@@ -524,10 +601,24 @@ def plan_diff_document(wdoc: dict, sdoc: dict) -> dict:
     for exp in annual_ops:
         cat = exp["identity"]["category"]
         matches = ann_index.get(_n(cat), [])
+        expected_value = None if exp.get("unknown") else _fmt(_frac(exp["value"]))
         base = {"identity": exp["identity"], "key": None,
-                "expectedPayload": {"Value": _fmt(_frac(exp["value"]))},
+                "expectedPayload": {"Value": expected_value},
                 "sources": exp["sources"], "section": "annual"}
+        if exp.get("unknown"):
+            if matches:
+                used_keys.update(id(m) for m in matches)
+                if len(matches) > 1:
+                    unresolved_total_rows["annual"].extend(str(m.get("key")) for m in matches)
+            ops.append({**base, "op": "conflict",
+                        "key": matches[0]["key"] if len(matches) == 1 else None,
+                        "before": [m["key"] for m in matches] if matches else {},
+                        "reason": "value-unknown"})
+            blocked = True
+            continue
         if len(matches) > 1:
+            used_keys.update(id(m) for m in matches)
+            unresolved_total_rows["annual"].extend(str(m.get("key")) for m in matches)
             ops.append({**base, "op": "conflict",
                         "before": [m["key"] for m in matches],
                         "reason": "indistinguishable-rows"})
@@ -555,44 +646,105 @@ def plan_diff_document(wdoc: dict, sdoc: dict) -> dict:
                     "changed": [] if same else ["Value"]})
         used_keys.add(id(cur))
 
-    # строки снимка вне запроса — сохранить, не трогать
+    # строки снимка вне запроса — сохранить, не трогать. Их часы остаются
+    # в итогах кабинета после записи книги, поэтому общий итог нельзя
+    # сравнивать с одним лишь computed книги.
     for r in snap_rows:
         if id(r) not in used_keys:
+            semester = r.get("semester")
+            kind = "autumn" if semester == 0 else "spring" if semester == 1 else None
+            if kind:
+                hours, unknown_fields = _snapshot_semester_hours(r["normalizedFields"])
+                ref = f"row:{r.get('key')}"
+                preserved_sources[kind].append(ref)
+                if hours is None:
+                    preserved_unknown[kind].extend(
+                        f"{ref}.{field}" for field in unknown_fields)
+                else:
+                    preserved[kind] += hours
             ops.append({"op": "preserve", "key": r["key"],
                         "identity": {**r["identity"], "semester": r["semester"]},
                         "before": r["rawFields"], "after": r["rawFields"],
                         "expectedPayload": {}, "sources": {}})
     for a in snap_annual:
         if id(a) not in used_keys:
+            hours = _snapshot_annual_hours(a)
+            ref = f"annual:{a.get('key')}"
+            preserved_sources["annual"].append(ref)
+            if hours is None:
+                preserved_unknown["annual"].append(f"{ref}.Value")
+            else:
+                preserved["annual"] += hours
             ops.append({"op": "preserve", "key": a["key"], "section": "annual",
                         "identity": {"year": sdata.get("year"),
                                      "category": a["category"]},
                         "before": a["value"]["raw"], "after": a["value"]["raw"],
                         "expectedPayload": {}, "sources": {}})
 
-    # четыре итога независимо: книга против снимка
+    # четыре итога независимо: цель после записи = книга + сохранённые
+    # строки вне запроса. Unknown в любом слагаемом остаётся unknown и не
+    # превращается в ноль; явный ноль при этом сохраняется как ноль.
     controls = {c["kind"]: c for c in wdoc["data"]["controls"]}
     snap_totals = sdata.get("totals") or {}
+    outside: dict[str, Fraction | None] = {}
+    for kind in ("autumn", "spring", "annual"):
+        outside[kind] = None if preserved_unknown[kind] else preserved[kind]
+    outside["grand"] = (
+        None if any(outside[k] is None for k in ("autumn", "spring", "annual"))
+        else sum((outside[k] for k in ("autumn", "spring", "annual")), Fraction(0))
+    )
     for kind in ("autumn", "spring", "annual", "grand"):
         book = controls.get(kind, {})
         before = snap_totals.get(kind) or {}
         computed = book.get("computed")
         before_v = before.get("value")
+        computed_n = _frac(computed) if computed is not None else None
+        unresolved = (
+            any(unresolved_total_rows[k] for k in ("autumn", "spring", "annual"))
+            if kind == "grand" else bool(unresolved_total_rows.get(kind))
+        )
+        target_n = (
+            None if computed_n is None or outside[kind] is None or unresolved
+            else computed_n + outside[kind]
+        )
+        target = _render_num(target_n) if target_n is not None else None
         match = "unknown"
-        if computed is not None and before.get("state") == "value" and before_v is not None:
-            match = "ok" if _frac(computed) == _frac(before_v) else "mismatch"
-        elif computed is not None and before.get("state") == "blank":
+        if target_n is not None and before.get("state") == "value" and before_v is not None:
+            match = "ok" if target_n == _frac(before_v) else "mismatch"
+        elif target_n is not None and before.get("state") == "blank":
             match = "blank"
         data["totals"].append({
             "kind": kind, "source": book.get("bookCells") or book.get("contributors"),
-            "computed": computed, "before": before.get("raw"),
-            "after": computed, "match": match,
+            "computed": computed,
+            "outside": _render_num(outside[kind]) if outside[kind] is not None else None,
+            "outsideSources": preserved_sources[kind] if kind != "grand" else (
+                preserved_sources["autumn"] + preserved_sources["spring"]
+                + preserved_sources["annual"]),
+            "before": before.get("raw"),
+            "after": target, "match": match,
         })
         if match == "mismatch":
             issues.append(issue(
-                "plan-total-mismatch", field=kind, expected=computed, actual=before_v,
-                next="итог кабинета не равен книге — ручная сверка до записи"))
+                "plan-total-mismatch", source=";".join(book.get("bookCells") or []),
+                field=kind, expected=target, actual=before_v,
+                next="итог кабинета не равен книге с учётом сохраняемых строк — "
+                     "ручная сверка до записи"))
             blocked = True
+        elif match == "unknown" and target_n is None:
+            if kind == "grand":
+                actual_unknown = []
+                for part in ("autumn", "spring", "annual"):
+                    actual_unknown += preserved_unknown[part]
+                    actual_unknown += unresolved_total_rows[part]
+            else:
+                actual_unknown = ((preserved_unknown.get(kind) or [])
+                                  + unresolved_total_rows.get(kind, []))
+            if actual_unknown:
+                issues.append(issue(
+                    "plan-total-unverified", field=kind,
+                    actual=actual_unknown,
+                    next="неизвестные часы сохраняемых/конфликтных строк — итог не сверен"))
+                blocked = True
 
     if any(c.get("match") == "mismatch" for c in wdoc["data"]["controls"]):
         blocked = True  # полная форма не сходится — даже частично не готовить

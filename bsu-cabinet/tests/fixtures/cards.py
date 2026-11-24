@@ -12,8 +12,8 @@
 
 from __future__ import annotations
 
-OWNER = "Иванова Анна Сергеевна"
-TEACHER = "Иванова А.С."
+OWNER = "Примерова Анна Сергеевна"
+TEACHER = "Примерова А.С."
 YEAR = "2026-2027"
 
 

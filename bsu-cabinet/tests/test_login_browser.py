@@ -1,9 +1,10 @@
 from unittest.mock import Mock
 
 import pytest
+from playwright.sync_api import sync_playwright
+
 from bsu_cabinet import browser_cli, creds, login, sms
 from bsu_cabinet.browser import BASE_URL, LOGIN_URL
-from playwright.sync_api import sync_playwright
 
 OTHER = "https://outside.example/Login"
 FORM = '<form><input id="login" type="text"><input id="password" type="password"></form>'

@@ -31,6 +31,17 @@ from .workload import _YEAR_RE, _eff, _merged_map, _norm
 MAX_INDEX_BYTES = 8 * 1024 * 1024
 MAX_BOOK_BYTES = 25 * 1024 * 1024
 MAX_UNPACKED_BYTES = 256 * 1024 * 1024
+# Учебный семестр исчисляется месяцами; два полных года — уже вне
+# поддерживаемого сценария. Эти пределы защищают развёртку повторяющихся
+# слотов от гигантских диапазонов и чрезмерного вывода.
+MAX_PERIOD_DAYS = 731
+MAX_SERIES_INSTANCES = 128
+
+
+class SeriesLimitError(ValueError):
+    """Превышен безопасный объём развёртки повторяющегося слота."""
+
+
 DRIVE_DOWNLOAD = (
     "https://drive.usercontent.google.com/download"
     "?id={id}&export=download&confirm=t"
@@ -50,11 +61,11 @@ _WEEKDAY_NUM = {name: i for i, name in enumerate(
      "saturday", "sunday"])}
 
 _KIND_MARKS = [
-    ("laboratory", re.compile(r"лабораторн|лаб\.?\b", re.I)),
-    ("lecture", re.compile(r"лекци|лек\.?\b", re.I)),
-    ("practice", re.compile(r"практич|практ\.?\b|семинар|\bпр\.?\b", re.I)),
-    ("usr", re.compile(r"\bуср\b|самостоятельн", re.I)),
-    ("consult", re.compile(r"консульт", re.I)),
+    ("laboratory", re.compile(r"лабораторн|лаб\.?\b", re.IGNORECASE)),
+    ("lecture", re.compile(r"лекци|лек\.?\b", re.IGNORECASE)),
+    ("practice", re.compile(r"практич|практ\.?\b|семинар|\bпр\.?\b", re.IGNORECASE)),
+    ("usr", re.compile(r"\bуср\b|самостоятельн", re.IGNORECASE)),
+    ("consult", re.compile(r"консульт", re.IGNORECASE)),
 ]
 
 _TEACHER_RE = re.compile(
@@ -68,20 +79,20 @@ _TIME_RE = re.compile(
 _TIME_AT_RE = re.compile(r"в\s*(\d{1,2})[.:](\d{2})")
 _BOUND_FROM_RE = re.compile(r"(?<![\d.])с\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?")
 _BOUND_TO_RE = re.compile(r"(?<![\d.])по\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?")
-_ODD_RE = re.compile(r"не\s*ч[её]тн", re.I)
-_EVEN_RE = re.compile(r"ч[её]тн", re.I)
-_EVERY_RE = re.compile(r"еженедельн|кажд\w*\s+недел", re.I)
+_ODD_RE = re.compile(r"не\s*ч[её]тн", re.IGNORECASE)
+_EVEN_RE = re.compile(r"ч[её]тн", re.IGNORECASE)
+_EVERY_RE = re.compile(r"еженедельн|кажд\w*\s+недел", re.IGNORECASE)
 
 _FOLDER_ID_RE = re.compile(r"/folders/([-\w]+)|[?&]id=([-\w]+)")
 _ENTRY_RE = re.compile(
     r'\[?"([-A-Za-z0-9_]{3,})",\["[^"]*"\],"([^"]+)","([^"]*)","([^"]*)"')
 _CARD_TAG_RE = re.compile(r"<[^>]+data-id=\"([^\"]+)\"[^>]*>")
 _TOOLTIP_RE = re.compile(r'data-tooltip="([^"]*)"')
-_XLSX_NAME_RE = re.compile(r"[^\"—<>]*?\.xlsx?", re.I)
+_XLSX_NAME_RE = re.compile(r"[^\"—<>]*?\.xlsx?", re.IGNORECASE)
 
 _ALLOWED_HOSTS = {"drive.google.com", "drive.usercontent.google.com"}
-_COURSE_RE = re.compile(r"(\d)\s*курс|курс\s*(\d)", re.I)
-_SEMESTER_RE = re.compile(r"(\d)\s*семестр|семестр\s*(\d)", re.I)
+_COURSE_RE = re.compile(r"(\d)\s*курс|курс\s*(\d)", re.IGNORECASE)
+_SEMESTER_RE = re.compile(r"(\d)\s*семестр|семестр\s*(\d)", re.IGNORECASE)
 
 
 def _allowed_url(url: str) -> bool:
@@ -330,11 +341,29 @@ def _cellref(ws, r: int, c: int) -> str:
     return f"'{ws.title}'!{get_column_letter(c)}{r}"
 
 
+
+
+def _value_row_end(ws) -> int:
+    """Последняя строка с реальным значением, игнорируя formatting-only хвост.
+
+    `ws.max_row` в XLSX раздувается от пустых стилей и бордюров. Внутренний
+    индекс openpyxl уже материализован при чтении книги, поэтому фильтр по
+    нему не обходит миллионы пустых строк и не обрезает строки с данными.
+    """
+    rows = []
+    for (r, _), cell in getattr(ws, "_cells", {}).items():
+        value = cell.value
+        if value is not None and (not isinstance(value, str) or value.strip()):
+            rows.append(r)
+    return max(rows, default=0)
+
+
 def _find_day_spans(ws, merges) -> tuple[int | None, list[dict]]:
     """Колонка дней и объединённые диапазоны (weekday, r0, r1)."""
     best_col, best_hits = None, 0
+    row_end = _value_row_end(ws)
     for c in range(1, min(ws.max_column or 1, 8) + 1):
-        hits = sum(1 for r in range(1, (ws.max_row or 0) + 1)
+        hits = sum(1 for r in range(1, row_end + 1)
                    if _norm(ws.cell(r, c).value) in _WEEKDAYS)
         if hits > best_hits:
             best_col, best_hits = c, hits
@@ -350,7 +379,7 @@ def _find_day_spans(ws, merges) -> tuple[int | None, list[dict]]:
                               "r0": mr.min_row, "r1": mr.max_row,
                               "ref": f"'{ws.title}'!{mr.coord}"})
                 covered.update(range(mr.min_row, mr.max_row + 1))
-    for r in range(1, (ws.max_row or 0) + 1):
+    for r in range(1, row_end + 1):
         if r in covered:
             continue
         label = _norm(ws.cell(r, best_col).value)
@@ -416,15 +445,21 @@ def _resolve_grid(ws, merges, day_col: int, time_cols: tuple[int | None, int | N
     band_rows = list(range(1, data_start))
     parity_row = None
     for r in band_rows:
+        parity_hits = 0
+        merged_hit = False
         for c in range(1, (ws.max_column or 1) + 1):
+            t = _eff(ws, merges, r, c)
+            if not (_ODD_RE.search(t) or (_EVEN_RE.search(t) and not _ODD_RE.search(t))):
+                continue
+            parity_hits += 1
             if (r, c) in merges:
                 _, c0, _, c1 = merges[(r, c)]
-                if c1 - c0 >= 1:
-                    t = _eff(ws, merges, r, c)
-                    if _ODD_RE.search(t) or (_EVEN_RE.search(t) and not _ODD_RE.search(t)):
-                        parity_row = r
-                        break
-        if parity_row:
+                merged_hit = merged_hit or c1 > c0
+        # Полоса чётности может быть одной объединённой подписью над
+        # диапазоном либо повторяться в отдельных колонках без merge.
+        # Пустые строки шапки здесь не участвуют и не сдвигают колонки.
+        if merged_hit or parity_hits >= 2:
+            parity_row = r
             break
     label_rows = []
     for r in band_rows:
@@ -468,15 +503,16 @@ def _resolve_grid(ws, merges, day_col: int, time_cols: tuple[int | None, int | N
         band = None
         if parity_row is not None:
             t = _eff(ws, merges, parity_row, c)
-            if t and (parity_row, c) in merges:
-                _, pc0, _, pc1 = merges[(parity_row, c)]
-                if pc1 - pc0 >= 1:
-                    if _ODD_RE.search(t):
-                        band = "odd"
-                    elif _EVEN_RE.search(t):
-                        band = "even"
-                    if band:
-                        refs.append(_cellref(ws, parity_row, c))
+            # Для merged-полосы `_eff` даёт подпись всем ячейкам диапазона;
+            # для раздельной striped-разметки действует только явная подпись
+            # самой колонки — пустое соседство не заполняется догадкой.
+            if t:
+                if _ODD_RE.search(t):
+                    band = "odd"
+                elif _EVEN_RE.search(t):
+                    band = "even"
+                if band:
+                    refs.append(_cellref(ws, parity_row, c))
         cols[c] = {"group": group, "subgroup": subgroup, "stream": stream,
                    "band": band, "headerRefs": refs}
     return {"cols": cols, "groupsRow": groups_row}
@@ -577,7 +613,7 @@ def _discipline_of(text: str) -> str | None:
             if any(rx.search(t) for _, rx in _KIND_MARKS):
                 continue
             if re.search(r"ауд\.|ч[её]тн|еженедельн|поток|^[св]\s|по\s|^\d", t,
-                         re.I):
+                         re.IGNORECASE):
                 continue
             parts.append(t)
         if parts:
@@ -677,7 +713,11 @@ def parse_schedule_book(blob: bytes, *, scope_req: dict) -> tuple[dict, list[dic
     slots: list[dict] = []
     all_teachers: dict[str, dict] = {}
     seen_cells: set[tuple[int, int]] = set()
-    for r in range(r0_data, (ws.max_row or r0_data) + 1):
+    # Разбирается только область, покрытая распознанными диапазонами дней.
+    # formatting-only/пустой хвост листа не обходится построчно, а текст за
+    # пределами сетки не становится занятием; внутри диапазонов обрезания нет.
+    data_end = max(s["r1"] for s in spans)
+    for r in range(r0_data, data_end + 1):
         day = _day_of_row(spans, r)
         if day is None:
             continue
@@ -789,8 +829,16 @@ def _isodate(s: str | None) -> date | None:
 
 
 def _unroll(slot: dict, from_d: date, to_d: date,
-            anchor: date | None) -> list[dict]:
-    """Даты слота в [from_d, to_d]: день недели, границы, фаза."""
+            anchor: date | None,
+            max_instances: int | None = None) -> list[dict]:
+    """Даты слота в [from_d, to_d]: день недели, границы, фаза.
+
+    Развёртка ограничена сверху даже при будущем появлении более частых
+    правил повторения: серия не может молча раздуть результат до тысяч
+    экземпляров.
+    """
+    if max_instances is None:
+        max_instances = MAX_SERIES_INSTANCES
     wd = _WEEKDAY_NUM[slot["weekday"]]
     b_from = _isodate(slot["bounds"].get("from"))
     b_to = _isodate(slot["bounds"].get("to"))
@@ -815,6 +863,9 @@ def _unroll(slot: dict, from_d: date, to_d: date,
                 if idx % 2 != want:
                     d += timedelta(days=7)
                     continue
+            if len(out) >= max_instances:
+                raise SeriesLimitError(
+                    f"series exceeds {max_instances} instances")
             out.append({"date": d.isoformat(),
                         "localStart": slot["localStart"],
                         "localEnd": slot["localEnd"],
@@ -1025,31 +1076,84 @@ def schedule_find_document(index_doc: dict, *, year: str, semester: int,
                      "cell": s["cell"]} for s in group],
             })
 
-    # вычисленные даты
-    if period_from and period_to:
-        from_d, to_d = _isodate(period_from), _isodate(period_to)
-        even_anchor = _isodate(even_week_start)
-        odd_anchor = _isodate(odd_week_start)
-        if even_anchor is None and odd_anchor is not None:
-            even_anchor = odd_anchor - timedelta(days=7)
-        anchor_missing = [
-            s for s in data["slots"]
-            if s["phase"] in ("even", "odd") and even_anchor is None]
-        if anchor_missing:
+    # вычисленные даты: диапазон валидируется до развёртки, чтобы ни
+    # ошибка ввода, ни гигантский период не превращались в бесконечную серию
+    if (period_from is None) != (period_to is None):
+        issues.append(issue(
+            "period-incomplete", field="period",
+            expected="обе границы --from и --to",
+            actual={"from": period_from, "to": period_to},
+            next="передать весь диапазон или убрать обе границы"))
+    elif period_from and period_to:
+
+        def _period_date(value: str, field: str) -> date | None:
+            try:
+                return date.fromisoformat(value)
+            except (TypeError, ValueError):
+                issues.append(issue(
+                    "period-invalid", field=field, expected="YYYY-MM-DD",
+                    actual=value, next="исправить дату периода"))
+                return None
+
+        def _anchor_date(value: str | None, field: str) -> date | None:
+            if value is None:
+                return None
+            try:
+                return date.fromisoformat(value)
+            except (TypeError, ValueError):
+                issues.append(issue(
+                    "period-invalid", field=field, expected="YYYY-MM-DD",
+                    actual=value, next="исправить календарный якорь"))
+                return None
+
+        from_d = _period_date(period_from, "from")
+        to_d = _period_date(period_to, "to")
+        even_anchor = _anchor_date(even_week_start, "even-week-start")
+        odd_anchor = _anchor_date(odd_week_start, "odd-week-start")
+        period_ready = from_d is not None and to_d is not None
+        if period_ready and from_d > to_d:
             issues.append(issue(
-                "phase-anchor-missing",
-                source=";".join(s["cell"] for s in anchor_missing),
-                expected="якорь чётной недели (--even-week-start)",
-                next="метки чётности не дают дат без календарного якоря"))
-        for s in data["slots"]:
-            if s["phase"] in ("even", "odd") and even_anchor is None:
-                s["instances"] = []
-            elif s["phase"] == "unknown":
-                s["instances"] = []
-            else:
-                s["instances"] = _unroll(s, from_d, to_d, even_anchor)
-        exc_list = (exceptions or {}).get("exceptions") or []
-        if exc_list:
-            _apply_exceptions(data["slots"], exc_list, issues)
+                "period-invalid", field="period", expected="from ≤ to",
+                actual={"from": period_from, "to": period_to},
+                next="исправить порядок границ периода"))
+            period_ready = False
+        elif period_ready and (to_d - from_d).days > MAX_PERIOD_DAYS:
+            issues.append(issue(
+                "period-too-large", field="period",
+                expected=f"≤{MAX_PERIOD_DAYS} дней",
+                actual=(to_d - from_d).days + 1,
+                next="разбить расчёт на учебные периоды — развёртка гигантского "
+                     "диапазона запрещена"))
+            period_ready = False
+        if period_ready:
+            if even_anchor is None and odd_anchor is not None:
+                even_anchor = odd_anchor - timedelta(days=7)
+            anchor_missing = [
+                s for s in data["slots"]
+                if s["phase"] in ("even", "odd") and even_anchor is None]
+            if anchor_missing:
+                issues.append(issue(
+                    "phase-anchor-missing",
+                    source=";".join(s["cell"] for s in anchor_missing),
+                    expected="якорь чётной недели (--even-week-start)",
+                    next="метки чётности не дают дат без календарного якоря"))
+            series_overflow: list[str] = []
+            for s in data["slots"]:
+                if s["phase"] in ("even", "odd") and even_anchor is None or s["phase"] == "unknown":
+                    s["instances"] = []
+                else:
+                    try:
+                        s["instances"] = _unroll(s, from_d, to_d, even_anchor)
+                    except SeriesLimitError:
+                        s["instances"] = []
+                        series_overflow.append(s["cell"])
+            if series_overflow:
+                issues.append(issue(
+                    "series-too-large", source=";".join(series_overflow),
+                    expected=f"≤{MAX_SERIES_INSTANCES} экземпляров на слот",
+                    next="сузить период или правило повторения — серия не развёрнута"))
+            exc_list = (exceptions or {}).get("exceptions") or []
+            if exc_list:
+                _apply_exceptions(data["slots"], exc_list, issues)
 
     return envelope("bsu.slots/1", status_of(issues), data, issues)

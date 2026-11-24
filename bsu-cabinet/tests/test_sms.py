@@ -4,6 +4,7 @@ from shlex import split
 from unittest.mock import Mock
 
 import pytest
+
 from bsu_cabinet import login, sms
 
 

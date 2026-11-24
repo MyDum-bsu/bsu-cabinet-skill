@@ -2,12 +2,13 @@
 
 ## Окружение
 
-- Из корня рабочего дерева `uv sync --all-groups` ставит `bsu-browser`
-  и `mo-cabinet` в `.venv`. Команды ниже выполняются через `uv run`.
+- В checkout проект лежит в `bsu-cabinet/`: `cd bsu-cabinet && uv sync --all-extras`
+  ставит `bsu-browser` и `mo-cabinet` в `bsu-cabinet/.venv`. Команды ниже
+  выполняются из каталога `bsu-cabinet` через `uv run` (или напрямую из `.venv/bin/`).
 - Chrome ищется сам: `BSU_CHROME` env → PATH → типовые пути Linux/Mac/Win.
-- **Эта машина**: env-прокси `127.0.0.1:25347` сайт не достаёт → для `start`
-  нужен `export BSU_NO_PROXY=1` (флаг `--no-proxy-server`; это НАШ кейс,
-  не часть системы). Для curl: `curl --noproxy '*'`.
+- Если настроенный в среде прокси не достаёт сайт кабинета, запускайте браузер
+  с `export BSU_NO_PROXY=1` (флаг Chrome `--no-proxy-server`). Для curl —
+  `curl --noproxy '*'`.
 - `bsu-browser login` открывает видимую настройку, если в текущем профиле
   ещё нет логина. Пароль сохраняется в нативном keyring (`bsu-cabinet`).
   Старые учётные данные `bsu-agent` не подхватываются.
@@ -33,9 +34,9 @@ uv run bsu-browser status              # после входа ожидаетс�
 
 ## Прогон в bb-треде
 
-1. В новом треде: `uv sync --all-groups` из корня checkout.
+1. В новом треде: `cd bsu-cabinet && uv sync --all-extras`.
 2. Прочитать `.agents/skills/bsu-cabinet-login/SKILL.md` и выполнить шаги —
-   все команды через `uv run bsu-browser …` в shell.
+   все команды через `uv run bsu-browser …` в shell из каталога `bsu-cabinet`.
 3. Скиллы: bsu-cabinet-login / bsu-cabinet-lesson-card /
    bsu-cabinet-individual-plan в `.agents/skills/`.
 

@@ -51,7 +51,7 @@ def get_password(login: str) -> str:
     backend = _system_keyring()
     try:
         password = backend.get_password(SERVICE, login)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — backend keyring скрыт за безопасной ошибкой
         raise CredentialError(f"Не удалось прочитать пароль из keyring ({type(exc).__name__}).") from None
     if not password:
         raise SetupRequiredError("Пароль не найден в keyring: bsu-browser setup")
@@ -67,7 +67,7 @@ def save_credentials(login: str, password: str) -> None:
         STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
         backend.set_password(SERVICE, login, password)
         LOGIN_FILE.write_text(login + "\n", encoding="utf-8")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — backend keyring скрыт за безопасной ошибкой
         raise CredentialError(f"Не удалось сохранить данные входа ({type(exc).__name__}).") from None
 
 

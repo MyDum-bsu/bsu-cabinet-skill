@@ -558,13 +558,16 @@ def parse_sht(path: str | Path, year: str | None = None) -> tuple[dict, list[dic
             return Fraction(0)
         return _frac(obj["value"])
 
-    def _total_cell(col: int) -> tuple[Fraction | None, str | None]:
+    def _total_cell(col: int, *, blank_is_zero: bool = False) -> tuple[Fraction | None, str | None]:
         if total_row_idx is None:
             return None, None
         ref = f"'{sheet}'!{get_column_letter(col)}{total_row_idx}"
         v = ws_d.cell(total_row_idx, col).value
         if v is None or (isinstance(v, str) and not v.strip()):
-            return Fraction(0), ref
+            # Пустая листовая статья годового блока означает отсутствие
+            # работы, но пустая контрольная ячейка семестра/года — это
+            # непрочитанный контроль, а не доказанный ноль.
+            return (Fraction(0) if blank_is_zero else None), ref
         try:
             return _frac(v), ref
         except (ValueError, ZeroDivisionError):
@@ -628,7 +631,7 @@ def parse_sht(path: str | Path, year: str | None = None) -> tuple[dict, list[dic
         for k in _ANNUAL_LEAF:
             if k not in cols_of:
                 continue
-            v, ref = _total_cell(cols_of[k])
+            v, ref = _total_cell(cols_of[k], blank_is_zero=True)
             if ref:
                 ann_refs.append(ref)
             if v is None:

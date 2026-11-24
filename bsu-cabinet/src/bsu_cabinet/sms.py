@@ -36,7 +36,7 @@ TIMEOUT_S = 120
 
 
 def _run(*args: str, timeout: int = 15) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([_adb(), *args], capture_output=True, text=True, timeout=timeout)
+    return subprocess.run([_adb(), *args], check=False, capture_output=True, text=True, timeout=timeout)
 
 
 class SmsUnavailableError(RuntimeError):

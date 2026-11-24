@@ -11,7 +11,6 @@ from pathlib import Path
 
 import openpyxl
 import pytest
-from bsu_cabinet.workload import workload_document
 from fixtures.sht import (
     CANON_ROWS,
     TEACHER,
@@ -21,6 +20,8 @@ from fixtures.sht import (
     correct_total_row,
     inject_formula_cache,
 )
+
+from bsu_cabinet.workload import workload_document
 
 
 @pytest.fixture()
@@ -38,7 +39,7 @@ def test_full_workbook_ok(canon: Path):
     assert doc["status"] == "ok", doc["issues"]
     data = doc["data"]
     assert data["sheet"] == "ШТ"
-    assert data["teacher"] == "Иванова Анна Сергеевна"
+    assert data["teacher"] == "Примерова Анна Сергеевна"
     assert data["year"] == "2026-2027"
     assert len(data["sourceSha"]) == 64
     assert len(data["rows"]) == 4
@@ -186,9 +187,9 @@ def test_spring_and_annual_not_mixed(canon: Path):
 
 def test_teacher_carry_forward_and_multi(canon: Path, tmp_path: Path):
     data = workload_document(canon)["data"]
-    assert data["rows"][2]["identity"]["teacher"]["value"] == "Иванова Анна Сергеевна"
+    assert data["rows"][2]["identity"]["teacher"]["value"] == "Примерова Анна Сергеевна"
     rows = [dict(CANON_ROWS[0]), dict(CANON_ROWS[1])]
-    rows[1]["identity"] = {**rows[1]["identity"], "teacher": "Петров Пётр Петрович"}
+    rows[1]["identity"] = {**rows[1]["identity"], "teacher": "Посторонний Пётр Примерович"}
     p = build_sht(tmp_path / "m.xlsx", rows=rows)
     doc = workload_document(p)
     assert "multiple-teachers" in _codes(doc)
@@ -254,7 +255,7 @@ def test_snapshot_is_single_revision_sha_values_formulas(tmp_path: Path, monkeyp
     sha_a = hashlib.sha256(a.read_bytes()).hexdigest()
 
     b = build_sht(tmp_path / "sht-b.xlsx",
-                  rows=[_row("Петрова Вера Ивановна", "=Q13/4")])
+                  rows=[_row("Посторонняя Вера Примеровна", "=Q13/4")])
     inject_formula_cache(b, consult_ref, 18)
     blob_b = b.read_bytes()
 
@@ -313,3 +314,33 @@ def test_cli_workload_envelope(canon: Path, capsys, monkeypatch):
     assert e.value.code == 0
     doc = json.loads(capsys.readouterr().out)
     assert doc["schema"] == "bsu.workload/1" and doc["status"] == "ok"
+
+
+def test_blank_grand_control_is_unknown_not_zero(tmp_path: Path):
+    """Пустая контрольная ячейка «Всего за год» — непрочитанный контроль,
+    а не доказанный ноль; ноль должен быть записан явно."""
+    total = correct_total_row(CANON_ROWS)
+    del total["year_total"]
+    p = build_sht(tmp_path / "blank-grand.xlsx", rows=CANON_ROWS, total_row=total)
+    doc = workload_document(p)
+    assert doc["status"] == "blocked"
+    grand = next(c for c in doc["data"]["controls"] if c["kind"] == "grand")
+    assert grand["book"] is None
+    assert grand["computed"] == "1298/5"  # computed сам по себе не стирается
+    assert grand["match"] == "unknown"
+    assert "total-unverified" in _codes(doc)
+
+
+def test_cli_missing_workload_argument_is_clean_error(capsys, monkeypatch):
+    """Неполная команда — понятный usage и exit 2, без traceback/IndexError."""
+    import sys
+
+    from bsu_cabinet import cli
+
+    monkeypatch.setattr(sys, "argv", ["mo-cabinet", "workload"])
+    with pytest.raises(SystemExit) as e:
+        cli.main()
+    assert e.value.code == 2
+    captured = capsys.readouterr()
+    assert "Использование: mo-cabinet workload <xlsx>" in captured.err
+    assert "Traceback" not in captured.err

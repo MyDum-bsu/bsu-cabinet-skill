@@ -41,17 +41,19 @@ import socket
 import subprocess
 import sys
 import time
+from contextlib import suppress
 from importlib.resources import as_file, files
 from ipaddress import IPv6Address, ip_address
 from pathlib import Path
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 STATE_DIR = Path(os.environ.get("BSU_STATE_DIR", Path.home() / ".bsu-cabinet"))
 PROFILE_DIR = STATE_DIR / "chrome-profile-cli"
 STATE_FILE = STATE_DIR / "session.json"
 SHOTS_DIR = STATE_DIR / "shots"
-DEBUG_PORT = int(os.environ.get("BSU_PORT", 9377))
+DEBUG_PORT = int(os.environ.get("BSU_PORT", "9377"))
 
 
 def _state() -> dict:
@@ -99,15 +101,13 @@ def _connect(expected: dict | None = None):
     pw = sync_playwright().start()
     try:
         browser = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{st['port']}")
-    except Exception:
+    except Exception:  # noqa: BLE001 — любой сбой CDP-транспорта означает недоступность
         pw.stop()
         raise _CdpUnreachable("Chrome не отвечает на CDP — перезапусти: bsu-browser start") from None
     ctx = browser.contexts[0] if browser.contexts else browser.new_context()
     page = _pick_page(ctx)
-    try:
+    with suppress(PlaywrightError):
         page.bring_to_front()
-    except Exception:
-        pass
     return pw, browser, page
 
 
@@ -123,12 +123,12 @@ def _pick_page(ctx):
             cdp = ctx.new_cdp_session(p)
             info = cdp.send("Browser.getWindowForTarget")
             live.append((info["windowId"], info.get("windowState"), p))
-        except Exception:
-            pass
+        except PlaywrightError:
+            continue
     if not live:
         return pages[-1]
     visible = [t for t in live if t[1] != "minimized"] or live
-    win = max(set(w for w, _, _ in visible), key=lambda w: sum(x[0] == w for x in visible))
+    win = max({w for w, _, _ in visible}, key=lambda w: sum(x[0] == w for x in visible))
     in_win = [p for w, _, p in visible if w == win]
     normal = [p for p in in_win if not p.url.startswith("chrome://")]
     return (normal or in_win)[-1]
@@ -190,7 +190,7 @@ def _pid_args(pid: int) -> list[str] | None:
     try:
         out = subprocess.run(
             ["ps", "-o", "command=", "-p", str(pid)],
-            capture_output=True, text=True, timeout=5,
+            check=False, capture_output=True, text=True, timeout=5,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -347,7 +347,7 @@ def _lsof_owner_pids(out: str, port: int) -> tuple[str, int | None]:
     полный заголовок в начале таблицы допустим; пустая таблица lsof
     не подтверждает отсутствие подходящих слушателей."""
     rows = [line.split() for line in out.splitlines() if line.strip()]
-    header = "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME".split()
+    header = ["COMMAND", "PID", "USER", "FD", "TYPE", "DEVICE", "SIZE/OFF", "NODE", "NAME"]
     # полный штатный заголовок обязателен — без него положение колонок
     # не подтверждено и ни одна строка не доказательна
     if not rows or rows[0] != header:
@@ -434,7 +434,7 @@ def _port_owner_pid(port: int) -> int | _UnresolvedOwner | None:
         (["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"], _lsof_owner_pids),
     ):
         try:
-            out = subprocess.run(argv, capture_output=True, text=True, timeout=5)
+            out = subprocess.run(argv, check=False, capture_output=True, text=True, timeout=5)
         except FileNotFoundError:
             continue  # команда отсутствует — единственный повод для fallback
         except (OSError, subprocess.TimeoutExpired, UnicodeDecodeError):
@@ -466,7 +466,7 @@ def _proc_start_token(pid: int) -> str | None:
     try:
         out = subprocess.run(
             ["ps", "-o", "lstart=", "-p", str(pid)],
-            capture_output=True, text=True, timeout=5,
+            check=False, capture_output=True, text=True, timeout=5,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -579,10 +579,9 @@ def _ensure_own_session(headless: bool) -> None:
         raise SystemExit(_FOREIGN_SESSION)
     if health == "live":
         return
-    if health == "ours":
+    if health == "ours" and not _stop_own_session(st):
         # свой процесс жив, но порт ему не подтверждён — перезапускаем свой
-        if not _stop_own_session(st):
-            raise SystemExit("Своя сессия не завершилась. Закрой её: bsu-browser stop.")
+        raise SystemExit("Своя сессия не завершилась. Закрой её: bsu-browser stop.")
     _save_state(port=None, pid=None)
     cmd_start(headless=headless)
 
@@ -595,7 +594,7 @@ def cmd_start(headless: bool | None = None) -> None:
             switch = headless is False and st.get("mode") == "headless"
             if not switch:
                 try:
-                    pw, browser, page = _connect(st)
+                    pw, _, page = _connect(st)
                     print(f"уже поднят: {page.url}")
                     pw.stop()
                     return
@@ -657,12 +656,10 @@ def cmd_start(headless: bool | None = None) -> None:
         # к CDP подключаемся только когда ОС независимо подтверждает, что
         # порт слушает именно наш pid; без доказательства — ждём/отказ
         if owner == proc.pid:
-            try:
-                pw, browser, page = _connect_test()
+            with suppress(PlaywrightError, RuntimeError):
+                pw, _, page = _connect_test()
                 pw.stop()
                 break
-            except Exception:
-                pass
         time.sleep(0.5)
     else:
         proc.terminate()
@@ -739,13 +736,13 @@ def cmd_stop() -> None:
 
 
 def cmd_status() -> None:
-    pw, browser, page = _connect()
+    pw, _, page = _connect()
     print(f"ok mode={_state().get('mode', '?')} url={page.url} title={page.title()}")
     pw.stop()
 
 
 def cmd_navigate(url: str) -> None:
-    pw, browser, page = _connect()
+    pw, _, page = _connect()
     page.goto(url, wait_until="domcontentloaded", timeout=30_000)
     page.wait_for_timeout(1500)
     print(page.url)
@@ -753,7 +750,7 @@ def cmd_navigate(url: str) -> None:
 
 
 def cmd_snapshot() -> None:
-    pw, browser, page = _connect()
+    pw, _, page = _connect()
     snap = page.evaluate(
         """() => {
           const vis = e => e.getBoundingClientRect().width > 0;
@@ -796,7 +793,7 @@ def cmd_snapshot_plan() -> None:
 
 
 def cmd_fill(label: str, value: str) -> None:
-    pw, browser, page = _connect()
+    pw, _, page = _connect()
     loc = page.get_by_label(label, exact=False)
     if loc.count() == 0:
         loc = page.locator(f'input[placeholder*="{label}" i], input[name*="{label}" i]')
@@ -915,32 +912,32 @@ def cmd_setup(timeout_s: int = 300) -> None:
 
 
 def cmd_click(text: str) -> None:
-    pw, browser, page = _connect()
+    pw, _, page = _connect()
     loc = page.get_by_text(text, exact=True).first
     try:
         loc.click(timeout=10_000)
-    except Exception:
+    except PlaywrightError:
         loc.evaluate("e => { e.scrollIntoView({block:'center'}); e.click(); }")
     print("ok")
     pw.stop()
 
 
 def cmd_click_xy(x: float, y: float) -> None:
-    pw, browser, page = _connect()
+    pw, _, page = _connect()
     page.mouse.click(x, y)
     print("ok")
     pw.stop()
 
 
 def cmd_key(key: str) -> None:
-    pw, browser, page = _connect()
+    pw, _, page = _connect()
     page.keyboard.press(key)
     print("ok")
     pw.stop()
 
 
 def cmd_wait_text(text: str, timeout_ms: int = 15_000) -> None:
-    pw, browser, page = _connect()
+    pw, _, page = _connect()
     page.wait_for_function(
         "t => document.body && document.body.innerText.includes(t)",
         arg=text,
@@ -951,14 +948,14 @@ def cmd_wait_text(text: str, timeout_ms: int = 15_000) -> None:
 
 
 def cmd_wait_url_not(substr: str, timeout_ms: int = 15_000) -> None:
-    pw, browser, page = _connect()
+    pw, _, page = _connect()
     page.wait_for_url(lambda url: substr not in url, timeout=timeout_ms)
     print(page.url)
     pw.stop()
 
 
 def cmd_eval(js: str) -> None:
-    pw, browser, page = _connect()
+    pw, _, page = _connect()
     res = page.evaluate(js)
     print(json.dumps(_jsonable(res), ensure_ascii=False))
     pw.stop()
@@ -966,7 +963,7 @@ def cmd_eval(js: str) -> None:
 
 def cmd_shot(name: str) -> None:
     SHOTS_DIR.mkdir(parents=True, exist_ok=True)
-    pw, browser, page = _connect()
+    pw, _, page = _connect()
     path = SHOTS_DIR / f"{name}.png"
     page.screenshot(path=str(path), full_page=True)
     print(path)
@@ -974,24 +971,31 @@ def cmd_shot(name: str) -> None:
 
 
 def cmd_url() -> None:
-    pw, browser, page = _connect()
+    pw, _, page = _connect()
     print(page.url)
     pw.stop()
 
 
 def cmd_title() -> None:
-    pw, browser, page = _connect()
+    pw, _, page = _connect()
     print(page.title())
     pw.stop()
 
 
 def cmd_text() -> None:
-    pw, browser, page = _connect()
+    pw, _, page = _connect()
     print(page.locator("body").inner_text())
     pw.stop()
 
 
 USAGE = __doc__
+
+
+def _require_args(rest: list[str], count: int, usage: str) -> None:
+    """Единая понятная ошибка CLI вместо IndexError на неполной команде."""
+    if len(rest) < count:
+        print(f"Недостаточно аргументов. Использование: {usage}", file=sys.stderr)
+        sys.exit(2)
 
 
 def main() -> None:
@@ -1007,36 +1011,46 @@ def main() -> None:
     elif cmd == "status":
         cmd_status()
     elif cmd == "navigate":
+        _require_args(rest, 1, "bsu-browser navigate <url>")
         cmd_navigate(rest[0])
     elif cmd == "snapshot" and rest[:1] == ["plan"]:
         cmd_snapshot_plan()
     elif cmd == "snapshot":
         cmd_snapshot()
     elif cmd == "fill":
+        _require_args(rest, 2, "bsu-browser fill <label> <value>")
         cmd_fill(rest[0], rest[1])
     elif cmd == "fill-login":
         cmd_fill_login()
     elif cmd == "login":
         login_command(rest)
     elif cmd == "creds":
+        _require_args(rest, 1, "bsu-browser creds <login>")
         cmd_creds(rest[0])
     elif cmd == "setup":
         cmd_setup(int(rest[0]) if rest else 300)
     elif cmd == "click":
+        _require_args(rest, 1, "bsu-browser click <text>")
         cmd_click(rest[0])
     elif cmd == "click-xy":
+        _require_args(rest, 2, "bsu-browser click-xy <x> <y>")
         cmd_click_xy(float(rest[0]), float(rest[1]))
     elif cmd == "key":
+        _require_args(rest, 1, "bsu-browser key <key>")
         cmd_key(rest[0])
     elif cmd == "confirm":
         cmd_click("Подтвердить")
     elif cmd == "wait-text":
+        _require_args(rest, 1, "bsu-browser wait-text <text> [ms]")
         cmd_wait_text(rest[0], int(rest[1]) if len(rest) > 1 else 15_000)
     elif cmd == "wait-url-not":
+        _require_args(rest, 1, "bsu-browser wait-url-not <substr>")
         cmd_wait_url_not(rest[0])
     elif cmd == "eval":
+        _require_args(rest, 1, "bsu-browser eval <js>")
         cmd_eval(rest[0])
     elif cmd == "shot":
+        _require_args(rest, 1, "bsu-browser shot <name>")
         cmd_shot(rest[0])
     elif cmd == "url":
         cmd_url()

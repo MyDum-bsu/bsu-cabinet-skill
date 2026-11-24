@@ -47,7 +47,7 @@ def option_id(options_html: str, needle: str) -> tuple[str, str]:
     """(value, text) первой опции, чей текст содержит needle (без учёта регистра)."""
     import re
 
-    for m in re.finditer(r'<option[^>]*value="([^"]*)"[^>]*>(.*?)</option>', options_html, re.S):
+    for m in re.finditer(r'<option[^>]*value="([^"]*)"[^>]*>(.*?)</option>', options_html, re.DOTALL):
         value, text = m.group(1), re.sub(r"<[^>]+>", "", m.group(2)).strip()
         if needle.lower() in text.lower():
             return value, text
@@ -182,11 +182,17 @@ def collect_plan_raw(page: Page) -> dict[str, Any]:
     это «не прочитано», а не «план пуст».
     """
     out: dict[str, Any] = {"loaded": False}
+    # Сводная вкладка — необязательное evidence-чтение. Её сбой не должен
+    # отменять основной DOM-снимок трёх рабочих разделов.
     try:
         summary = send_model(page, "Teacher/PersonalPlanTable4/0", {})
         out["summaryHtml"] = summary.get("Title") if isinstance(summary, dict) else None
+    except Exception as exc:  # noqa: BLE001 — необязательное evidence-чтение не влияет на DOM
+        out["summaryHtml"] = None
+        out["summaryError"] = type(exc).__name__
+    try:
         dom = page.evaluate(_COLLECT_DOM_JS)
-    except Exception as exc:  # нет страницы/сессии — снимок недостоверен
+    except Exception as exc:  # noqa: BLE001 — любой сбой evaluate означает недостоверный снимок
         out["error"] = f"{type(exc).__name__}: {exc}"
         return out
     out.update({

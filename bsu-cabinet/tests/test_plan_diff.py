@@ -6,12 +6,11 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
 import pytest
-from bsu_cabinet.plan import plan_diff_document, snapshot_document
-from bsu_cabinet.workload import workload_document
 from fixtures.plan import (
     raw_closed,
     raw_empty,
@@ -19,6 +18,9 @@ from fixtures.plan import (
     raw_unloaded,
 )
 from fixtures.sht import CANON_ROWS, build_sht
+
+from bsu_cabinet.plan import plan_diff_document, snapshot_document
+from bsu_cabinet.workload import workload_document
 
 
 @pytest.fixture()
@@ -48,7 +50,7 @@ def test_snapshot_states():
     assert closed["data"]["state"] == "closed"
     assert "snapshot-readonly" in _codes(closed)
     # загруженный, но пустой по строкам и годовым — «пусто», а не «не прочитано»
-    bare = {"owner": "Иванова Анна Сергеевна", "year": "2026-2027",
+    bare = {"owner": "Примерова Анна Сергеевна", "year": "2026-2027",
             "statusPlan": 0, "loaded": True}
     assert snapshot_document(bare)["data"]["state"] == "empty"
 
@@ -152,7 +154,7 @@ def test_repeated_diff_is_deterministic(wdoc: dict):
 
 
 def test_empty_plan_without_annual_categories_conflicts(wdoc: dict):
-    raw = {"owner": "Иванова Анна Сергеевна", "year": "2026-2027",
+    raw = {"owner": "Примерова Анна Сергеевна", "year": "2026-2027",
            "statusPlan": 0, "loaded": True,
            "rows": [], "annual": [], "totals": {}}
     doc = plan_diff_document(wdoc, snapshot_document(raw))
@@ -165,7 +167,7 @@ def test_empty_plan_without_annual_categories_conflicts(wdoc: dict):
 def test_owner_mismatch_blocks_without_operations(wdoc: dict):
     """Другой владелец снимка при той же книге — блокировка до операций."""
     raw = raw_populated()
-    raw["owner"] = "Петров Пётр Петрович"
+    raw["owner"] = "Посторонний Пётр Примерович"
     doc = plan_diff_document(wdoc, snapshot_document(raw))
     assert doc["status"] == "blocked"
     assert "owner-mismatch" in _codes(doc)
@@ -175,7 +177,7 @@ def test_owner_mismatch_blocks_without_operations(wdoc: dict):
 def test_owner_abbreviated_is_ambiguous(wdoc: dict):
     """Сокращённое ФИО не считается тем же аккаунтом без подтверждения."""
     raw = raw_populated()
-    raw["owner"] = "Иванова А. С."
+    raw["owner"] = "Примерова А. С."
     doc = plan_diff_document(wdoc, snapshot_document(raw))
     assert doc["status"] == "blocked"
     assert "owner-ambiguous" in _codes(doc)
@@ -225,7 +227,7 @@ def test_before_hash_binds_owner_year_status(wdoc: dict):
     hashes = []
     for mutate in (
         lambda r: None,
-        lambda r: r.update(owner="Петров Пётр Петрович"),
+        lambda r: r.update(owner="Посторонний Пётр Примерович"),
         lambda r: r.update(year="2027-2028"),
         lambda r: r.update(statusPlan=1),
         lambda r: r["rows"][0]["fields"].update(Clock_lecture_a="30"),
@@ -246,3 +248,113 @@ def test_totals_mismatch_reported(wdoc: dict):
     assert "plan-total-mismatch" in _codes(doc)
     t = next(t for t in doc["data"]["totals"] if t["kind"] == "autumn")
     assert t["computed"] == "528/5" and t["before"] == "100"
+
+
+def test_preserve_rows_count_independent_totals(wdoc: dict):
+    """Строка вне запроса остаётся в кабинете и входит в целевой итог."""
+    doc = plan_diff_document(wdoc, snapshot_document(raw_populated()))
+    assert doc["status"] == "ok", doc["issues"]
+    totals = {t["kind"]: t for t in doc["data"]["totals"]}
+    # row:900 — 40 ч лекций осени вне книги; они не обнуляются и не
+    # подменяют собой computed книги (105,6 = 528/5).
+    assert totals["autumn"]["computed"] == "528/5"
+    assert totals["autumn"]["outside"] == 40
+    assert totals["autumn"]["after"] == "728/5"  # 145,6 точной дробью
+    assert totals["autumn"]["match"] == "ok"
+    assert totals["grand"]["outside"] == 40
+    assert totals["grand"]["after"] == "1498/5"  # 299,6 = книга + preserve
+    assert totals["grand"]["match"] == "ok"
+
+
+def test_unknown_preserve_hours_never_become_zero(wdoc: dict):
+    """Нечисловое/непрочитанное поле preserve-строки не складывается как 0."""
+    raw = raw_populated()
+    row900 = next(r for r in raw["rows"] if r["key"] == "900")
+    row900["fields"]["Clock_lecture_a"] = "не прочитано"
+    doc = plan_diff_document(wdoc, snapshot_document(raw))
+    assert doc["status"] == "blocked"
+    assert "plan-total-unverified" in _codes(doc)
+    assert any(i["code"] == "plan-total-unverified" and i["field"] == "grand"
+               for i in doc["issues"])
+    totals = {t["kind"]: t for t in doc["data"]["totals"]}
+    assert totals["autumn"]["outside"] is None
+    assert totals["autumn"]["after"] is None
+    assert totals["autumn"]["match"] == "unknown"
+    assert totals["grand"]["match"] == "unknown"
+
+
+def test_explicit_zero_preserve_hours_is_zero_not_unknown(wdoc: dict):
+    """Явный ноль сохраняемой строки остаётся нулём и не делает итог unknown."""
+    raw = raw_populated()
+    row900 = next(r for r in raw["rows"] if r["key"] == "900")
+    row900["fields"]["Clock_lecture_a"] = "0"
+    raw["totals"]["autumn"] = "105,6"
+    raw["totals"]["grand"] = "259,6"
+    doc = plan_diff_document(wdoc, snapshot_document(raw))
+    assert doc["status"] == "ok", doc["issues"]
+    totals = {t["kind"]: t for t in doc["data"]["totals"]}
+    assert totals["autumn"]["outside"] == 0
+    assert totals["autumn"]["after"] == "528/5"
+    assert totals["autumn"]["match"] == "ok"
+    assert totals["grand"]["match"] == "ok"
+
+
+def test_annual_unknown_is_value_conflict_alongside_policy_block(wdoc: dict):
+    """Unknown годовой ячейки — data-конфликт, а не missing/policy-запрет."""
+    row = next(r for r in wdoc["data"]["rows"]
+               if r["identity"]["discipline"]["value"] == "Дискретная математика")
+    cell = row["annual"]["supervision_diploma"]
+    cell.update(state="unknown", value=None, raw="=СУММ(нет_кэша)")
+    doc = plan_diff_document(wdoc, snapshot_document(raw_closed()))
+    assert doc["status"] == "blocked"
+    codes = _codes(doc)
+    assert "plan-readonly" in codes       # policy-блок остаётся сам по себе
+    assert "value-unknown" in codes       # и не маскирует неизвестное значение
+    assert "annual-missing" not in codes  # категория есть — проблема именно в значении
+    conflict = next(o for o in doc["data"]["operations"]
+                    if o.get("section") == "annual"
+                    and o["identity"]["category"] == "Руководство дипломными работами")
+    assert conflict["op"] == "conflict"
+    assert conflict["reason"] == "value-unknown"
+    assert conflict["expectedPayload"] == {"Value": None}
+
+
+def test_annual_preserve_row_counts_in_annual_and_grand_totals(wdoc: dict):
+    """Годовая preserve-строка тоже входит в целевые annual/grand итоги."""
+    raw = raw_populated()
+    other = next(a for a in raw["annual"] if a["category"] == "Иные виды работ")
+    other["value"] = "5"
+    raw["totals"]["annual"] = "90"
+    raw["totals"]["grand"] = "304,6"
+    doc = plan_diff_document(wdoc, snapshot_document(raw))
+    assert doc["status"] == "ok", doc["issues"]
+    totals = {t["kind"]: t for t in doc["data"]["totals"]}
+    assert totals["annual"]["outside"] == 5
+    assert totals["annual"]["after"] == 90
+    assert totals["annual"]["match"] == "ok"
+    assert totals["grand"]["outside"] == 45  # 40 ч осени + 5 годовых
+    assert totals["grand"]["after"] == "1523/5"  # 304,6 точной дробью
+    assert totals["grand"]["match"] == "ok"
+
+
+def test_indistinguishable_rows_make_totals_unverified_not_zero(wdoc: dict):
+    """Конфликт-дубликат нельзя ни перезаписать, ни молча считать preserve/нулём."""
+    raw = raw_populated()
+    duplicate = copy.deepcopy(next(r for r in raw["rows"] if r["key"] == "101"))
+    duplicate["key"] = "901"
+    raw["rows"].append(duplicate)
+    doc = plan_diff_document(wdoc, snapshot_document(raw))
+    assert doc["status"] == "blocked"
+    assert "rows-conflict" in _codes(doc)
+    assert "plan-total-unverified" in _codes(doc)
+    assert any(i["code"] == "plan-total-unverified" and i["field"] == "grand"
+               for i in doc["issues"])
+    conflict = next(o for o in doc["data"]["operations"]
+                    if o.get("reason") == "indistinguishable-rows")
+    assert conflict["op"] == "conflict"
+    assert conflict["before"] == ["101", "901"]
+    totals = {t["kind"]: t for t in doc["data"]["totals"]}
+    assert totals["autumn"]["after"] is None
+    assert totals["autumn"]["match"] == "unknown"
+    assert totals["grand"]["after"] is None
+    assert totals["grand"]["match"] == "unknown"
