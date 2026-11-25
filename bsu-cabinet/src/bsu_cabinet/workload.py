@@ -563,6 +563,12 @@ def parse_sht(path: str | Path, year: str | None = None) -> tuple[dict, list[dic
             return None, None
         ref = f"'{sheet}'!{get_column_letter(col)}{total_row_idx}"
         v = ws_d.cell(total_row_idx, col).value
+        if ws_f.cell(total_row_idx, col).data_type == "f" and (
+                v is None or (isinstance(v, str) and not v.strip())):
+            # Формула без сохранённого кэша не прочитана. Даже для годовой
+            # листовой статьи, где обычная пустая ячейка означает ноль,
+            # формула — это не пусто и не ноль.
+            return None, ref
         if v is None or (isinstance(v, str) and not v.strip()):
             # Пустая листовая статья годового блока означает отсутствие
             # работы, но пустая контрольная ячейка семестра/года — это

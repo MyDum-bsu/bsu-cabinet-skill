@@ -358,3 +358,18 @@ def test_indistinguishable_rows_make_totals_unverified_not_zero(wdoc: dict):
     assert totals["autumn"]["match"] == "unknown"
     assert totals["grand"]["after"] is None
     assert totals["grand"]["match"] == "unknown"
+
+
+@pytest.mark.parametrize("bad", ["NaN", "не прочитано"])
+def test_unparseable_cabinet_grand_total_blocks_even_with_known_target(wdoc: dict, bad: str):
+    """Нечисловой итог кабинета — unknown и блок, даже если целевой итог книги известен."""
+    raw = raw_populated()
+    raw["totals"]["grand"] = bad
+    doc = plan_diff_document(wdoc, snapshot_document(raw))
+    assert doc["status"] == "blocked"
+    issue = next(i for i in doc["issues"] if i["code"] == "plan-total-unverified"
+                 and i["field"] == "grand")
+    assert "totals.grand" in issue["actual"]
+    total = next(t for t in doc["data"]["totals"] if t["kind"] == "grand")
+    assert total["after"] == "1498/5"  # цель известна, но факт кабинета не прочитан
+    assert total["match"] == "unknown"

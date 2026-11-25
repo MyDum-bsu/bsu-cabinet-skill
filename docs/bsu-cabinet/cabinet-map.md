@@ -22,8 +22,8 @@
 ## Навигация
 
 Меню «Преподаватель» (клик раскрывает):
-- Индивидуальный план → `/Teacher/PersonalPlan` (IdEmpStaff=149361)
-- Карточка №1,2 учёта проведённых занятий → `/Teacher/CardOne[/149361]#<Key>`
+- Индивидуальный план → `/Teacher/PersonalPlan` (IdEmpStaff=<staffId>)
+- Карточка №1,2 учёта проведённых занятий → `/Teacher/CardOne[/<staffId>]#<Key>`
 - Расписание занятий / экзаменов (ShowDeptList)
 
 Важно: CardOne пуст, пока не заполнен ИП — «Перед заполнением карточки
@@ -73,7 +73,7 @@ tbl-30 = итого.
    Value, ValueResult, Description}`;
   быстрое значение: `PersonalPlanMainSaveAll_Plan {Key, Value}`.
 - Отправить на проверку: `Send('Teacher/PersonalPlanChangeStatus', st)`
-  — НЕ вызывать без подтверждения CTO.
+  — НЕ вызывать без подтверждения владельца.
 - Excel-выгрузка плана: `Send('Teacher/PersonalPlanExcel', 0)`.
 
 ### Карточка занятий (/Teacher/CardOne/<staffId>#<Key>)
@@ -114,5 +114,5 @@ l_statusCheck, l_check, l_normTime, l_statusExamA, l_statusExamB, l_student.
 ## Границы
 
 - Любой SendModel с 'Save'/'Add'/'ChangeStatus' — реальная запись в кабинет.
-  По умолчанию работаем dry-run; запись — только по явному добру CTO,
+  По умолчанию работаем dry-run; запись — только по явному подтверждению владельца,
   ChangeStatus (отправка на проверку) — отдельное подтверждение.

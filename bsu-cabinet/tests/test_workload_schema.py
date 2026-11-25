@@ -344,3 +344,17 @@ def test_cli_missing_workload_argument_is_clean_error(capsys, monkeypatch):
     captured = capsys.readouterr()
     assert "Использование: mo-cabinet workload <xlsx>" in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_uncached_formula_in_annual_leaf_total_is_unknown_not_zero(tmp_path: Path):
+    """Формула без кэша в строке «Итого» annual-leaf не превращается в ноль."""
+    total = correct_total_row(CANON_ROWS)
+    total["supervision_diploma"] = Formula("=SUM(BB13:BB16)")
+    p = build_sht(tmp_path / "uncached-total.xlsx", rows=CANON_ROWS, total_row=total)
+    doc = workload_document(p)
+    assert doc["status"] == "blocked"
+    annual = next(c for c in doc["data"]["controls"] if c["kind"] == "annual")
+    assert annual["book"] is None
+    assert annual["computed"] == 85
+    assert annual["match"] == "unknown"
+    assert "total-unverified" in _codes(doc)

@@ -43,5 +43,5 @@ def test_parse_group_xlsx(tmp_path: Path):
     assert roster.group == "1"
     assert roster.course == 3
     assert len(roster.students) == 3
-    assert roster.students[0].name == "Студентова Алина Примеровна"
+    assert roster.students[0].name == "Студент 1"
     assert roster.students[0].subgroup == "1А"

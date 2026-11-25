@@ -730,7 +730,7 @@ def plan_diff_document(wdoc: dict, sdoc: dict) -> dict:
                 next="итог кабинета не равен книге с учётом сохраняемых строк — "
                      "ручная сверка до записи"))
             blocked = True
-        elif match == "unknown" and target_n is None:
+        elif match == "unknown":
             if kind == "grand":
                 actual_unknown = []
                 for part in ("autumn", "spring", "annual"):
@@ -739,12 +739,16 @@ def plan_diff_document(wdoc: dict, sdoc: dict) -> dict:
             else:
                 actual_unknown = ((preserved_unknown.get(kind) or [])
                                   + unresolved_total_rows.get(kind, []))
-            if actual_unknown:
-                issues.append(issue(
-                    "plan-total-unverified", field=kind,
-                    actual=actual_unknown,
-                    next="неизвестные часы сохраняемых/конфликтных строк — итог не сверен"))
-                blocked = True
+            if before.get("state") == "unknown":
+                actual_unknown.append(f"totals.{kind}")
+            if not actual_unknown:
+                actual_unknown = [f"computed.{kind}"]
+            issues.append(issue(
+                "plan-total-unverified", field=kind,
+                actual=actual_unknown,
+                next="итог кабинета или часы сохраняемых/конфликтных строк "
+                     "неизвестны — итог не сверен"))
+            blocked = True
 
     if any(c.get("match") == "mismatch" for c in wdoc["data"]["controls"]):
         blocked = True  # полная форма не сходится — даже частично не готовить

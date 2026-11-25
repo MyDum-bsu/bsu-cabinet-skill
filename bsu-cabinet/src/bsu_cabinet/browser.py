@@ -3,7 +3,7 @@
 Playwright + системный Google Chrome (/usr/bin/google-chrome), постоянный профиль
 ~/.bsu-cabinet/chrome-profile — куки и сессия кабинета переживают перезапуск.
 
-ВАЖНО: локальный прокси из env (127.0.0.1:25347) не достаёт teacher-cabinet.bsu.by
+ВАЖНО: локальный прокси из env (127.0.0.1:<port>) не достаёт teacher-cabinet.bsu.by
 — Chrome запускаем с --no-proxy-server.
 """
 
